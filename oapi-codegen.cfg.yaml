@@ -1,0 +1,4 @@
+package: api
+generate:
+  - types
+output: openapi_types.gen.go # <-- Указываем только имя файла

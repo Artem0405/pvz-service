@@ -1,0 +1,677 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>service: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/Artem0405/pvz-service/internal/service/auth_service.go (89.7%)</option>
+				
+				<option value="file1">github.com/Artem0405/pvz-service/internal/service/pvz_service.go (95.7%)</option>
+				
+				<option value="file2">github.com/Artem0405/pvz-service/internal/service/reception_service.go (82.9%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package service
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "log/slog"
+        "time"
+
+        "github.com/Artem0405/pvz-service/internal/domain"
+        "github.com/Artem0405/pvz-service/internal/repository" // Убедитесь, что интерфейс UserRepository и константы ошибок здесь
+        "github.com/golang-jwt/jwt/v5"                         // Импорт пакета JWT v5
+        "golang.org/x/crypto/bcrypt"                           // Импорт пакета bcrypt
+)
+
+// Claims определяет структуру полезной нагрузки (payload) JWT токена.
+type Claims struct {
+        Role string `json:"role"`
+        // Можно добавить другие поля, например UserID
+        jwt.RegisteredClaims // Встраиваем стандартные RegisteredClaims (exp, iat, iss, etc.)
+}
+
+// jwtKey хранит секретный ключ для подписи и проверки JWT токенов.
+// Инициализируется в конструкторе NewAuthService.
+var jwtKey []byte
+
+// AuthServiceImpl реализует логику сервиса аутентификации.
+type AuthServiceImpl struct {
+        userRepo repository.UserRepository // Зависимость от репозитория пользователей
+}
+
+// AuthService определяет интерфейс для сервиса аутентификации (если он нужен).
+// Хорошая практика - определить интерфейс, но для исправления текущих ошибок это не обязательно.
+// type AuthService interface {
+//  Register(ctx context.Context, email, password, role string) (domain.User, error)
+//  Login(ctx context.Context, email, password string) (string, error)
+//  GenerateToken(role string) (string, error)
+//  ValidateToken(tokenString string) (*Claims, error)
+// }
+
+// NewAuthService - конструктор для AuthServiceImpl.
+// Принимает секретный ключ JWT и репозиторий пользователей.
+func NewAuthService(secret string, userRepo repository.UserRepository) *AuthServiceImpl <span class="cov8" title="1">{
+        if secret == "" </span><span class="cov8" title="1">{
+                // Паника при старте, если не задан секрет - это критическая ошибка конфигурации.
+                panic("JWT_SECRET не может быть пустым")</span>
+        }
+        <span class="cov8" title="1">jwtKey = []byte(secret) // Инициализируем глобальный ключ
+        return &amp;AuthServiceImpl{
+                userRepo: userRepo,
+        }</span>
+}
+
+// Register обрабатывает регистрацию нового пользователя.
+func (s *AuthServiceImpl) Register(ctx context.Context, email, password, role string) (domain.User, error) <span class="cov8" title="1">{
+        // 1. Валидация входных данных
+        if email == "" || password == "" </span><span class="cov8" title="1">{
+                // Возвращаем конкретную ошибку для невалидного ввода
+                return domain.User{}, domain.ErrAuthValidation // Пример использования доменной ошибки
+        }</span>
+        <span class="cov8" title="1">if role != domain.RoleEmployee &amp;&amp; role != domain.RoleModerator </span><span class="cov8" title="1">{
+                return domain.User{}, fmt.Errorf("недопустимая роль пользователя: %s", role)
+        }</span>
+        // TODO: Добавить более строгую валидацию формата email и сложности пароля.
+
+        // 2. Хеширование пароля
+        <span class="cov8" title="1">hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+        if err != nil </span><span class="cov0" title="0">{
+                slog.ErrorContext(ctx, "Ошибка хеширования пароля при регистрации", "email", email, "error", err)
+                // Не раскрываем внутренние детали ошибки пользователю
+                return domain.User{}, fmt.Errorf("внутренняя ошибка сервера")
+        }</span>
+
+        // 3. Создание пользователя в репозитории
+        <span class="cov8" title="1">newUser := domain.User{
+                Email:        email,
+                PasswordHash: string(hashedPassword),
+                Role:         role,
+                // ID будет присвоен базой данных или сгенерирован в CreateUser
+        }
+        userID, err := s.userRepo.CreateUser(ctx, newUser)
+        if err != nil </span><span class="cov8" title="1">{
+                // Проверяем на конкретную ошибку дубликата
+                if errors.Is(err, repository.ErrUserDuplicateEmail) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка регистрации с существующим email", "email", email)
+                        // Возвращаем специфическую ошибку, которую может обработать хендлер (например, для статуса 409)
+                        return domain.User{}, repository.ErrUserDuplicateEmail
+                }</span>
+                // Логируем любую другую ошибку репозитория
+                <span class="cov8" title="1">slog.ErrorContext(ctx, "Ошибка создания пользователя в репозитории", "email", email, "error", err)
+                // Возвращаем обернутую ошибку
+                return domain.User{}, fmt.Errorf("не удалось зарегистрировать пользователя: %w", err)</span>
+        }
+
+        // 4. Успешная регистрация - возвращаем данные пользователя (без хеша пароля!)
+        <span class="cov8" title="1">createdUser := domain.User{
+                ID:    userID,
+                Email: email,
+                Role:  role,
+        }
+        slog.InfoContext(ctx, "Пользователь успешно зарегистрирован", "user_id", userID, "email", email)
+        return createdUser, nil</span>
+}
+
+// Login обрабатывает вход пользователя и возвращает JWT токен.
+func (s *AuthServiceImpl) Login(ctx context.Context, email, password string) (string, error) <span class="cov8" title="1">{
+        // 1. Получаем пользователя из репозитория по email
+        user, err := s.userRepo.GetUserByEmail(ctx, email)
+        if err != nil </span><span class="cov8" title="1">{
+                // Если пользователь не найден, возвращаем общую ошибку (защита от перебора)
+                if errors.Is(err, repository.ErrUserNotFound) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка входа несуществующего пользователя", "email", email)
+                        return "", domain.ErrAuthInvalidCredentials
+                }</span>
+                // Логируем любую другую ошибку репозитория
+                <span class="cov8" title="1">slog.ErrorContext(ctx, "Ошибка получения пользователя по email при логине", "email", email, "error", err)
+                // Возвращаем обернутую ошибку
+                return "", fmt.Errorf("ошибка входа: %w", err)</span>
+        }
+
+        // 2. Сравниваем предоставленный пароль с хешем из БД
+        <span class="cov8" title="1">err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+        if err != nil </span><span class="cov8" title="1">{
+                // Если хеши не совпадают (bcrypt.ErrMismatchedHashAndPassword) или другая ошибка bcrypt
+                slog.WarnContext(ctx, "Неудачная попытка входа (неверный пароль)", "email", email)
+                // Возвращаем ту же общую ошибку (защита от перебора)
+                return "", domain.ErrAuthInvalidCredentials
+        }</span>
+
+        // 3. Пароль верный - генерируем JWT токен
+        <span class="cov8" title="1">tokenString, err := s.GenerateToken(user.Role) // Используем роль пользователя из БД
+        if err != nil </span><span class="cov0" title="0">{
+                // Ошибка генерации токена уже логируется внутри GenerateToken
+                // Оборачиваем ошибку для контекста
+                return "", fmt.Errorf("не удалось сгенерировать токен: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">slog.InfoContext(ctx, "Пользователь успешно вошел в систему", "user_id", user.ID, "email", email)
+        return tokenString, nil</span>
+}
+
+// GenerateToken генерирует новый JWT токен для указанной роли.
+func (s *AuthServiceImpl) GenerateToken(role string) (string, error) <span class="cov8" title="1">{
+        // Устанавливаем срок действия токена (например, 24 часа)
+        expirationTime := time.Now().Add(24 * time.Hour)
+        // Создаем полезную нагрузку (claims)
+        claims := &amp;Claims{
+                Role: role,
+                RegisteredClaims: jwt.RegisteredClaims{
+                        // Устанавливаем стандартные claims
+                        ExpiresAt: jwt.NewNumericDate(expirationTime),
+                        IssuedAt:  jwt.NewNumericDate(time.Now()),
+                        Issuer:    "pvz-service", // Опционально: указываем издателя
+                },
+        }
+
+        // Создаем новый токен с указанием метода подписи и claims
+        token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+        // Подписываем токен секретным ключом
+        tokenString, err := token.SignedString(jwtKey)
+        if err != nil </span><span class="cov0" title="0">{
+                slog.Error("Ошибка подписи JWT токена", "error", err)
+                // Возвращаем общую ошибку сервера
+                return "", fmt.Errorf("внутренняя ошибка сервера при генерации токена")
+        }</span>
+
+        <span class="cov8" title="1">return tokenString, nil</span>
+}
+
+// ValidateToken проверяет подпись и срок действия JWT токена.
+// Возвращает claims токена в случае успеха.
+func (s *AuthServiceImpl) ValidateToken(tokenString string) (*Claims, error) <span class="cov8" title="1">{
+        claims := &amp;Claims{}
+
+        // Парсим токен, проверяя подпись и claims
+        token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) </span><span class="cov8" title="1">{
+                // Валидация метода подписи: убеждаемся, что это HMAC, а не 'none' или другой
+                if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok </span><span class="cov8" title="1">{
+                        return nil, fmt.Errorf("неожиданный метод подписи: %v", token.Header["alg"])
+                }</span>
+                // Возвращаем секретный ключ для проверки подписи
+                <span class="cov8" title="1">return jwtKey, nil</span>
+        })
+
+        // Обработка ошибок парсинга и валидации
+        <span class="cov8" title="1">if err != nil </span><span class="cov8" title="1">{
+                if errors.Is(err, jwt.ErrTokenExpired) </span><span class="cov8" title="1">{
+                        slog.Debug("Ошибка валидации токена: токен истек")
+                        return nil, domain.ErrAuthTokenExpired // Возвращаем доменную ошибку
+                }</span>
+                <span class="cov8" title="1">if errors.Is(err, jwt.ErrTokenMalformed) </span><span class="cov8" title="1">{
+                        slog.Debug("Ошибка валидации токена: некорректный формат")
+                        return nil, domain.ErrAuthTokenMalformed
+                }</span>
+                <span class="cov8" title="1">if errors.Is(err, jwt.ErrSignatureInvalid) </span><span class="cov8" title="1">{
+                        slog.Warn("Ошибка валидации токена: неверная подпись")
+                        return nil, domain.ErrAuthTokenInvalidSignature
+                }</span>
+                // Логируем другие, менее ожидаемые ошибки парсинга
+                <span class="cov8" title="1">slog.Error("Неожиданная ошибка парсинга JWT", "error", err)
+                // Возвращаем общую ошибку невалидного токена
+                return nil, fmt.Errorf("%w: %v", domain.ErrAuthTokenInvalid, err)</span>
+        }
+
+        // Дополнительная проверка флага Valid (хотя ParseWithClaims обычно это делает)
+        <span class="cov8" title="1">if !token.Valid </span><span class="cov0" title="0">{
+                slog.Warn("Токен прошел парсинг, но помечен как невалидный")
+                return nil, domain.ErrAuthTokenInvalid
+        }</span>
+
+        // Токен успешно прошел все проверки
+        <span class="cov8" title="1">return claims, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package service
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "log/slog"
+        "time" // Необходим для GetPVZList и формирования ответа в CreatePVZ
+
+        "github.com/Artem0405/pvz-service/internal/domain"
+        "github.com/Artem0405/pvz-service/internal/repository"
+        "github.com/google/uuid" // Необходим для ключей карт в GetPVZList
+
+        // --- ИМПОРТ ПАКЕТА С МЕТРИКАМИ ---
+        // Предполагается, что вы создадите этот пакет и определите в нем
+        // экспортируемую метрику: var PVZCreatedTotal = promauto.NewCounter(...)
+        mmetrics "github.com/Artem0405/pvz-service/internal/metrics"
+        // ---------------------------------
+)
+
+// pvzService - реализация интерфейса PVZService.
+// Содержит бизнес-логику для управления ПВЗ.
+// Использует интерфейсы репозиториев для взаимодействия с хранилищем данных.
+type pvzService struct {
+        pvzRepo       repository.PVZRepository       // Репозиторий для работы с ПВЗ
+        receptionRepo repository.ReceptionRepository // Репозиторий для работы с приемками (нужен для GetPVZList)
+}
+
+// NewPVZService - конструктор для создания экземпляра pvzService.
+// Принимает интерфейсы репозиториев в качестве зависимостей.
+func NewPVZService(pvzRepo repository.PVZRepository, receptionRepo repository.ReceptionRepository) *pvzService <span class="cov8" title="1">{
+        return &amp;pvzService{
+                pvzRepo:       pvzRepo,
+                receptionRepo: receptionRepo,
+        }
+}</span>
+
+// CreatePVZ - создает новый ПВЗ после валидации входных данных.
+func (s *pvzService) CreatePVZ(ctx context.Context, input domain.PVZ) (domain.PVZ, error) <span class="cov8" title="1">{
+        // 1. Валидация входных данных (город)
+        if input.City != "Москва" &amp;&amp; input.City != "Санкт-Петербург" &amp;&amp; input.City != "Казань" </span><span class="cov8" title="1">{
+                // Логируем как предупреждение (Warn), так как это ошибка ввода пользователя, а не системы
+                slog.WarnContext(ctx, "Попытка создания ПВЗ с недопустимым городом", slog.String("город", input.City))
+                return domain.PVZ{}, errors.New("создание ПВЗ возможно только в городах: Москва, Санкт-Петербург, Казань")
+        }</span>
+
+        // 2. Вызов репозитория ПВЗ для сохранения данных
+        // Передаем только те поля, которые нужны для создания в БД
+        <span class="cov8" title="1">pvzToCreate := domain.PVZ{
+                City: input.City,
+        }
+        newID, err := s.pvzRepo.CreatePVZ(ctx, pvzToCreate)
+        if err != nil </span><span class="cov8" title="1">{
+                // Логируем как ошибку (Error), так как проблема на уровне БД/репозитория
+                slog.ErrorContext(ctx, "Ошибка репозитория при создании ПВЗ",
+                        slog.String("город", input.City),
+                        slog.Any("error", err), // Используем Any для ошибки
+                )
+                return domain.PVZ{}, fmt.Errorf("не удалось сохранить ПВЗ: %w", err)
+        }</span>
+
+        // --- ИНКРЕМЕНТ БИЗНЕС-МЕТРИКИ ---
+        <span class="cov8" title="1">mmetrics.PVZCreatedTotal.Inc()
+        slog.InfoContext(ctx, "Инкрементирована метрика pvz_created_total")
+        // ---------------------------------
+
+        // 3. Формирование ответа
+        // Заполняем структуру ответа, включая сгенерированный ID и дату (приблизительную)
+        createdPVZ := domain.PVZ{
+                ID:               newID,
+                City:             input.City,
+                RegistrationDate: time.Now(), // Генерируем дату для ответа API, БД сама ставит точную
+        }
+
+        // Логируем успешное создание как информацию (Info)
+        slog.InfoContext(ctx, "ПВЗ успешно создан", slog.String("pvz_id", newID.String()), slog.String("город", input.City))
+
+        return createdPVZ, nil</span>
+}
+
+// GetPVZList - реализация метода получения списка ПВЗ с деталями (приемками и товарами).
+// Возвращает GetPVZListResult с доменными моделями.
+func (s *pvzService) GetPVZList(ctx context.Context, startDate, endDate *time.Time, page, limit int) (domain.GetPVZListResult, error) <span class="cov8" title="1">{
+        // Инициализируем пустую структуру результата
+        // Важно инициализировать карты, чтобы избежать nil pointer panic позже
+        result := domain.GetPVZListResult{
+                Receptions: make(map[uuid.UUID][]domain.Reception),
+                Products:   make(map[uuid.UUID][]domain.Product),
+                PVZs:       []domain.PVZ{}, // Инициализируем пустым слайсом
+        }
+
+        // 1. Получаем страницу ПВЗ и общее количество из репозитория ПВЗ
+        pvzList, totalCount, err := s.pvzRepo.ListPVZs(ctx, page, limit)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка получения списка ПВЗ из репозитория", "error", err, "page", page, "limit", limit)
+                return result, fmt.Errorf("не удалось получить список ПВЗ: %w", err)
+        }</span>
+        <span class="cov8" title="1">result.TotalPVZs = totalCount
+
+        // Если ПВЗ на этой странице (или вообще) нет, возвращаем результат с пустым списком PVZs
+        if len(pvzList) == 0 </span><span class="cov8" title="1">{
+                slog.InfoContext(ctx, "ПВЗ не найдены для данной страницы/фильтров", "page", page, "limit", limit, "startDate", startDate, "endDate", endDate)
+                // result уже инициализирован с пустым PVZs и totalCount = 0 (или актуальным)
+                return result, nil
+        }</span>
+        <span class="cov8" title="1">result.PVZs = pvzList // Сохраняем найденные ПВЗ
+
+        // 2. Собираем ID полученных ПВЗ для последующих запросов
+        pvzIDs := make([]uuid.UUID, 0, len(pvzList))
+        for _, pvz := range pvzList </span><span class="cov8" title="1">{
+                pvzIDs = append(pvzIDs, pvz.ID)
+        }</span>
+
+        // 3. Получаем все приемки для этих ПВЗ с учетом фильтров по дате
+        <span class="cov8" title="1">receptions, err := s.receptionRepo.ListReceptionsByPVZIDs(ctx, pvzIDs, startDate, endDate)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка получения приемок для ПВЗ", "pvz_ids", pvzIDs, "error", err)
+                // Возвращаем ошибку, т.к. без приемок не можем показать полную картину
+                return result, fmt.Errorf("не удалось получить приемки: %w", err)
+        }</span>
+
+        // Если приемок нет (из-за фильтров или их отсутствия), нет смысла запрашивать товары
+        <span class="cov8" title="1">if len(receptions) == 0 </span><span class="cov0" title="0">{
+                slog.InfoContext(ctx, "Приемки не найдены для ПВЗ на этой странице/фильтров", "pvz_ids", pvzIDs, "startDate", startDate, "endDate", endDate)
+                // result уже содержит PVZs и пустые карты Receptions/Products
+                return result, nil
+        }</span>
+
+        // Группируем приемки по ID ПВЗ и собираем ID приемок для запроса товаров
+        <span class="cov8" title="1">receptionIDs := make([]uuid.UUID, 0, len(receptions))
+        for _, rcp := range receptions </span><span class="cov8" title="1">{
+                result.Receptions[rcp.PVZID] = append(result.Receptions[rcp.PVZID], rcp)
+                receptionIDs = append(receptionIDs, rcp.ID)
+        }</span>
+
+        // 4. Получаем все товары для найденных приемок
+        <span class="cov8" title="1">products, err := s.receptionRepo.ListProductsByReceptionIDs(ctx, receptionIDs)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка получения товаров для приемок", "reception_ids", receptionIDs, "error", err)
+                // Возвращаем ошибку, т.к. запросили приемки, но не смогли получить товары
+                return result, fmt.Errorf("не удалось получить товары: %w", err)
+        }</span>
+
+        // Группируем товары по ID приемки
+        <span class="cov8" title="1">for _, p := range products </span><span class="cov8" title="1">{
+                result.Products[p.ReceptionID] = append(result.Products[p.ReceptionID], p)
+        }</span>
+
+        <span class="cov8" title="1">slog.InfoContext(ctx, "Список ПВЗ с деталями успешно сформирован", "page", page, "limit", limit, "pvz_count_on_page", len(result.PVZs), "total_pvz_count", result.TotalPVZs)
+        // 5. Возвращаем собранную структуру с доменными данными
+        return result, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package service
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "log/slog"
+        "time"
+
+        // import "log" // &lt;-- Удалить
+        // &lt;-- Добавить
+
+        "github.com/Artem0405/pvz-service/internal/domain"
+        "github.com/Artem0405/pvz-service/internal/repository"
+        "github.com/google/uuid"
+)
+
+// receptionService - реализация ReceptionService
+type receptionService struct {
+        repo repository.ReceptionRepository // Зависимость от репозитория приемок
+        // Возможно, понадобится PVZ репозиторий для проверки существования PVZ ID
+        // pvzRepo repository.PVZRepository
+}
+
+// NewReceptionService - конструктор
+func NewReceptionService(repo repository.ReceptionRepository) *receptionService <span class="cov8" title="1">{
+        return &amp;receptionService{
+                repo: repo,
+        }
+}</span>
+
+// InitiateReception - начинает новую приемку
+func (s *receptionService) InitiateReception(ctx context.Context, pvzID uuid.UUID) (domain.Reception, error) <span class="cov8" title="1">{
+        // Проверяем, нет ли уже открытой приемки для этого ПВЗ
+        _, err := s.repo.GetLastOpenReceptionByPVZ(ctx, pvzID)
+
+        // Обрабатываем результат проверки
+        if err == nil </span><span class="cov8" title="1">{
+                // Ошибки нет =&gt; Найдена открытая приемка! Нельзя начать новую.
+                slog.WarnContext(ctx, "Попытка начать новую приемку при наличии открытой", "pvz_id", pvzID)
+                return domain.Reception{}, errors.New("предыдущая приемка для этого ПВЗ еще не закрыта")
+        }</span>
+
+        // Если ошибка - это НЕ "не найдено", значит, произошла другая проблема при проверке
+        <span class="cov8" title="1">if !errors.Is(err, repository.ErrReceptionNotFound) </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка при проверке существующей открытой приемки", "pvz_id", pvzID, "error", err)
+                return domain.Reception{}, fmt.Errorf("ошибка проверки существующей приемки: %w", err)
+        }</span>
+
+        // Если мы здесь, значит err == repository.ErrReceptionNotFound - можно создавать новую
+
+        // TODO: Опционально - проверить, существует ли сам pvzID, если добавить pvzRepo
+
+        // Создаем новую запись о приемке
+        <span class="cov8" title="1">newReception := domain.Reception{
+                PVZID:  pvzID,
+                Status: domain.StatusInProgress, // Устанавливается по умолчанию
+                // DateTime установится в БД по умолчанию
+        }
+
+        createdID, err := s.repo.CreateReception(ctx, newReception)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка репозитория при создании приемки", "pvz_id", pvzID, "error", err)
+                return domain.Reception{}, fmt.Errorf("не удалось создать приемку: %w", err)
+        }</span>
+
+        // Формируем ответ API (ID и PVZID уже есть, добавим примерное время)
+        <span class="cov8" title="1">createdReception := domain.Reception{
+                ID:       createdID,
+                PVZID:    pvzID,
+                Status:   domain.StatusInProgress,
+                DateTime: time.Now(), // Примерное время для ответа
+        }
+        slog.InfoContext(ctx, "Приемка успешно создана", "reception_id", createdID, "pvz_id", pvzID)
+        return createdReception, nil</span>
+}
+
+// AddProduct - добавляет товар в последнюю открытую приемку для указанного ПВЗ
+func (s *receptionService) AddProduct(ctx context.Context, pvzID uuid.UUID, productType domain.ProductType) (domain.Product, error) <span class="cov8" title="1">{
+        // 1. Проверяем валидность типа товара (хотя хендлер тоже должен проверять)
+        if productType != domain.TypeElectronics &amp;&amp; productType != domain.TypeClothes &amp;&amp; productType != domain.TypeShoes </span><span class="cov8" title="1">{
+                slog.WarnContext(ctx, "Попытка добавить товар недопустимого типа", "pvz_id", pvzID, "type", productType)
+                return domain.Product{}, errors.New("недопустимый тип товара")
+        }</span>
+
+        // 2. Находим последнюю открытую приемку для этого ПВЗ
+        <span class="cov8" title="1">openReception, err := s.repo.GetLastOpenReceptionByPVZ(ctx, pvzID)
+        if err != nil </span><span class="cov8" title="1">{
+                if errors.Is(err, repository.ErrReceptionNotFound) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка добавить товар без открытой приемки", "pvz_id", pvzID)
+                        return domain.Product{}, errors.New("нет открытой приемки для данного ПВЗ, чтобы добавить товар")
+                }</span>
+                // Другая ошибка при поиске приемки
+                <span class="cov8" title="1">slog.ErrorContext(ctx, "Ошибка поиска открытой приемки", "pvz_id", pvzID, "error", err)
+                return domain.Product{}, fmt.Errorf("ошибка поиска открытой приемки: %w", err)</span>
+        }
+        <span class="cov8" title="1">slog.DebugContext(ctx, "Найдена открытая приемка для добавления товара", "reception_id", openReception.ID, "pvz_id", pvzID)
+
+        // 3. Готовим данные товара для сохранения
+        productToCreate := domain.Product{
+                ReceptionID: openReception.ID, // Связываем с найденной приемкой
+                Type:        productType,
+                // ID и DateTimeAdded будут сгенерированы БД/репозиторием
+        }
+
+        // 4. Вызываем репозиторий для сохранения товара
+        newProductID, err := s.repo.AddProductToReception(ctx, productToCreate)
+        if err != nil </span><span class="cov8" title="1">{
+                slog.ErrorContext(ctx, "Ошибка добавления товара в репозиторий", "reception_id", openReception.ID, "type", productType, "error", err)
+                return domain.Product{}, fmt.Errorf("не удалось добавить товар в приемку: %w", err)
+        }</span>
+        <span class="cov8" title="1">slog.InfoContext(ctx, "Товар успешно добавлен в репозиторий", "product_id", newProductID, "reception_id", openReception.ID)
+
+        // --- ИСПРАВЛЕНИЕ: Формируем и возвращаем ЗАПОЛНЕННУЮ структуру ---
+        addedProduct := domain.Product{
+                ID:            newProductID,     // Используем ID, полученный от репозитория
+                ReceptionID:   openReception.ID, // ID найденной открытой приемки
+                Type:          productType,      // Тип, который передали на вход
+                DateTimeAdded: time.Now(),       // Примерное время для ответа API (БД ставит точное)
+        }
+
+        return addedProduct, nil</span> // Возвращаем созданный товар и nil ошибку
+        // --- Конец исправления ---
+}
+
+// DeleteLastProduct - удаляет последний добавленный товар из открытой приемки
+func (s *receptionService) DeleteLastProduct(ctx context.Context, pvzID uuid.UUID) error <span class="cov8" title="1">{
+        // 1. Находим последнюю открытую приемку
+        openReception, err := s.repo.GetLastOpenReceptionByPVZ(ctx, pvzID)
+        if err != nil </span><span class="cov8" title="1">{
+                if errors.Is(err, repository.ErrReceptionNotFound) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка удалить товар без открытой приемки", "pvz_id", pvzID)
+                        return errors.New("нет открытой приемки для данного ПВЗ, чтобы удалить товар")
+                }</span>
+                <span class="cov0" title="0">slog.ErrorContext(ctx, "Ошибка поиска открытой приемки при удалении товара", "pvz_id", pvzID, "error", err)
+                return fmt.Errorf("ошибка поиска открытой приемки: %w", err)</span>
+        }
+
+        // 2. Находим последний добавленный товар в этой приемке
+        <span class="cov8" title="1">lastProduct, err := s.repo.GetLastProductFromReception(ctx, openReception.ID)
+        if err != nil </span><span class="cov8" title="1">{
+                if errors.Is(err, repository.ErrProductNotFound) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка удалить товар из пустой приемки", "reception_id", openReception.ID)
+                        return errors.New("в текущей открытой приемке нет товаров для удаления")
+                }</span>
+                <span class="cov0" title="0">slog.ErrorContext(ctx, "Ошибка поиска последнего товара в приемке", "reception_id", openReception.ID, "error", err)
+                return fmt.Errorf("ошибка поиска последнего товара: %w", err)</span>
+        }
+
+        // 3. Удаляем найденный товар по его ID
+        <span class="cov8" title="1">err = s.repo.DeleteProductByID(ctx, lastProduct.ID)
+        if err != nil </span><span class="cov0" title="0">{
+                // Обрабатываем случай, если товар уже был удален (хотя мы его только что нашли)
+                if errors.Is(err, repository.ErrProductNotFound) </span><span class="cov0" title="0">{ // Репозиторий должен вернуть эту ошибку, если RowsAffected=0
+                        slog.ErrorContext(ctx, "Ошибка удаления товара: товар не найден (возможно, удален параллельно)", "product_id", lastProduct.ID, "error", err)
+                        return errors.New("не удалось удалить товар, так как он не найден") // Ошибка для клиента
+                }</span>
+                // Другая ошибка репозитория
+                <span class="cov0" title="0">slog.ErrorContext(ctx, "Ошибка удаления товара из репозитория", "product_id", lastProduct.ID, "error", err)
+                return fmt.Errorf("не удалось удалить товар: %w", err)</span>
+        }
+
+        <span class="cov8" title="1">slog.InfoContext(ctx, "Последний товар успешно удален из приемки", "product_id", lastProduct.ID, "reception_id", openReception.ID)
+        return nil</span>
+}
+
+// CloseLastReception - закрывает последнюю открытую приемку
+func (s *receptionService) CloseLastReception(ctx context.Context, pvzID uuid.UUID) (domain.Reception, error) <span class="cov8" title="1">{
+        // 1. Находим последнюю открытую приемку
+        openReception, err := s.repo.GetLastOpenReceptionByPVZ(ctx, pvzID)
+        if err != nil </span><span class="cov8" title="1">{
+                if errors.Is(err, repository.ErrReceptionNotFound) </span><span class="cov8" title="1">{
+                        slog.WarnContext(ctx, "Попытка закрыть приемку при отсутствии открытой", "pvz_id", pvzID)
+                        return domain.Reception{}, errors.New("нет открытой приемки для данного ПВЗ для закрытия")
+                }</span>
+                <span class="cov0" title="0">slog.ErrorContext(ctx, "Ошибка поиска открытой приемки при закрытии", "pvz_id", pvzID, "error", err)
+                return domain.Reception{}, fmt.Errorf("ошибка поиска открытой приемки: %w", err)</span>
+        }
+
+        // 2. Вызываем метод репозитория для изменения статуса на 'closed'
+        <span class="cov8" title="1">err = s.repo.CloseReceptionByID(ctx, openReception.ID)
+        if err != nil </span><span class="cov8" title="1">{
+                // Обрабатываем случай, если приемка уже была закрыта или не найдена
+                if errors.Is(err, repository.ErrReceptionNotFound) </span><span class="cov0" title="0">{ // Репозиторий должен вернуть это, если RowsAffected=0
+                        slog.ErrorContext(ctx, "Ошибка закрытия приемки: приемка не найдена или уже закрыта", "reception_id", openReception.ID, "error", err)
+                        return domain.Reception{}, errors.New("не удалось закрыть приемку, так как она не найдена или уже закрыта")
+                }</span>
+                // Другая ошибка репозитория
+                <span class="cov8" title="1">slog.ErrorContext(ctx, "Ошибка закрытия приемки в репозитории", "reception_id", openReception.ID, "error", err)
+                return domain.Reception{}, fmt.Errorf("не удалось закрыть приемку: %w", err)</span>
+        }
+
+        // 3. Формируем ответ с обновленным статусом
+        <span class="cov8" title="1">closedReception := openReception             // Копируем данные найденной приемки
+        closedReception.Status = domain.StatusClosed // Обновляем статус
+        // Время DateTime остается временем начала приемки
+
+        slog.InfoContext(ctx, "Приемка успешно закрыта", "reception_id", closedReception.ID, "pvz_id", pvzID)
+        return closedReception, nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

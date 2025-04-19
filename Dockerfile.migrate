@@ -1,0 +1,25 @@
+# Используем тот же базовый образ Go, что и для нашего приложения
+FROM golang:1.24-alpine AS builder
+
+# Устанавливаем метку для удобства
+LABEL stage=builder
+
+# Обновляем пакеты Alpine и устанавливаем необходимые зависимости:
+# build-base - содержит компиляторы C/C++ (могут понадобиться для CGO)
+# git - нужен для скачивания модулей Go, если они не проксируются
+RUN apk update && apk add --no-cache build-base git
+
+# Указываем рабочую директорию (не обязательно, но хорошая практика)
+WORKDIR /app
+
+# Устанавливаем migrate с тегом postgres
+# Используем флаг -v для более подробного вывода
+RUN go install -v -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+# --- Эта часть ниже не нужна для простого теста установки ---
+# --- Если установка выше пройдет успешно, бинарник окажется в $GOPATH/bin или $GOBIN ---
+
+# --- Можно добавить финальный этап для копирования бинарника, если нужно ---
+# FROM alpine:latest
+# COPY --from=builder /go/bin/migrate /usr/local/bin/migrate
+# ENTRYPOINT ["migrate", "-version"]

@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  pvz-app:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "8080:8080" # Основной порт API
+      - "9000:9000" # Порт для Prometheus метрик <-- ОТКРЫВАЕМ ПОРТ МЕТРИК
+      - "3000:3000" # <--- gRPC
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # ... ваши переменные окружения (DB_HOST, DB_PORT, etc.) ...
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: pvzdb
+      JWT_SECRET: your-very-secure-secret-key-for-testing # Используйте более безопасный секрет!
+      PORT: 8080 # Убедитесь, что порт совпадает
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: pvzdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Добавляем инициализационные скрипты миграций, если нужно
+      # - ../migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d pvzdb -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.17.1 # Используйте нужную версию
+    volumes:
+      - ../migrations:/migrations # Монтируем локальную папку migrations внутрь контейнера
+    # Команда по умолчанию не нужна, т.к. мы передаем ее через 'run'
+    # Но можно задать entrypoint для удобства
+    entrypoint: ["migrate"]
+    depends_on:
+      - db # Запускать после базы данных
+
+  # НОВЫЙ СЕРВИС: Prometheus
+  prometheus:
+    image: prom/prometheus:v2.45.0 # Используйте актуальную версию
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml # Монтируем конфиг
+    ports:
+      - "9090:9090" # Веб-интерфейс Prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - pvz-app # Запускаем после приложения
+
+volumes:
+  postgres_data: # Docker сам управляет этим volume

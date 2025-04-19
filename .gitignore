@@ -1,0 +1,22 @@
+# VS Code
+.vscode/
+
+# Go build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+pvz-service # Имя вашего бинарника (если оно будет таким)
+
+# Go dependency directory (если используется vendor)
+vendor/
+
+# Env files
+.env
+
+# Mac system files
+.DS_Store
+
+# Log files
+*.log

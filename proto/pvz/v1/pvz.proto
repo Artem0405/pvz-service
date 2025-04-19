@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+// Имя пакета в Protobuf
+package pvz.v1;
+
+// Опция для генерации Go кода. Путь должен вести к директории pkg/pvz_v1
+// ;pvz_v1 в конце указывает имя Go-пакета.
+option go_package = "github.com/Artem0405/pvz-service/pkg/pvz_v1;pvz_v1";
+
+// Импортируем стандартный тип Timestamp
+import "google/protobuf/timestamp.proto";
+
+// Определение сервиса
+service PVZService {
+  // RPC метод для получения списка всех ПВЗ
+  rpc GetPVZList(GetPVZListRequest) returns (GetPVZListResponse);
+}
+
+// Сообщение, описывающее ПВЗ
+message PVZ {
+  string id = 1;                            // UUID ПВЗ как строка
+  google.protobuf.Timestamp registration_date = 2; // Дата регистрации
+  string city = 3;                            // Город
+}
+
+// Пустое сообщение для запроса GetPVZList (параметры не нужны)
+message GetPVZListRequest {}
+
+// Сообщение для ответа GetPVZList
+message GetPVZListResponse {
+  repeated PVZ pvzs = 1; // Повторяющееся поле (список) ПВЗ
+}
+
+// Оставляем enum ReceptionStatus, хотя он не используется в этом RPC,
+// он может понадобиться для будущих методов.
+enum ReceptionStatus {
+  RECEPTION_STATUS_UNSPECIFIED = 0; // Хорошая практика - иметь нулевое значение по умолчанию
+  RECEPTION_STATUS_IN_PROGRESS = 1;
+  RECEPTION_STATUS_CLOSED = 2;
+}
