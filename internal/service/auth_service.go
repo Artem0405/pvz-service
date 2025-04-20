@@ -40,13 +40,13 @@ type AuthServiceImpl struct {
 
 // NewAuthService - конструктор для AuthServiceImpl.
 // Принимает секретный ключ JWT и репозиторий пользователей.
-func NewAuthService(secret string, userRepo repository.UserRepository) *AuthServiceImpl {
+func NewAuthService(secret string, userRepo repository.UserRepository) AuthService { // <-- Возвращаем ИНТЕРФЕЙС
 	if secret == "" {
-		// Паника при старте, если не задан секрет - это критическая ошибка конфигурации.
 		panic("JWT_SECRET не может быть пустым")
 	}
-	jwtKey = []byte(secret) // Инициализируем глобальный ключ
-	return &AuthServiceImpl{
+	// Инициализируем глобальный ключ (или поле структуры, если jwtKey - поле)
+	jwtKey = []byte(secret)
+	return &AuthServiceImpl{ // <-- Возвращаем указатель на СТРУКТУРУ, которая реализует интерфейс
 		userRepo: userRepo,
 	}
 }

@@ -65,15 +65,45 @@ func initDB() (*sql.DB, error) {
 	}
 
 	slog.Info("Соединение с базой данных успешно установлено!")
-	return db, nil
+
+	// --- НАСТРОЙКА ПУЛА СОЕДИНЕНИЙ ---
+	// Устанавливаем лимит чуть меньше, чем max_connections в PostgreSQL (обычно 100).
+	// Оставляем небольшой запас (~10-20%) для других возможных подключений.
+	maxOpenConns := 80 // Начнем с 80
+	db.SetMaxOpenConns(maxOpenConns)
+
+	// Устанавливаем количество соединений, которые могут простаивать в пуле.
+	db.SetMaxIdleConns(maxOpenConns) // Часто ставят равным MaxOpenConns
+
+	// Опционально: Установить максимальное время жизни соединения.
+	db.SetConnMaxLifetime(time.Hour)
+
+	// Опционально: Установить максимальное время простоя.
+	// db.SetConnMaxIdleTime(10 * time.Minute)
+
+	slog.Info("Настроен пул соединений с БД", "MaxOpenConns", maxOpenConns, "MaxIdleConns", maxOpenConns)
+	// --- КОНЕЦ НАСТРОЙКИ ПУЛА ---
+
+	return db, nil // Возвращаем настроенный объект db
 }
 
 // --- ОСНОВНАЯ ФУНКЦИЯ ---
 func main() {
 	// 0. Настройка логгера slog
+	logLevel := slog.LevelInfo // Уровень по умолчанию
+	// Опционально: читаем уровень из переменной окружения для гибкости
+	if levelStr := os.Getenv("LOG_LEVEL"); levelStr != "" {
+		var lvl slog.Level
+		if err := lvl.UnmarshalText([]byte(levelStr)); err == nil {
+			logLevel = lvl
+		} else {
+			slog.Warn("Некорректный LOG_LEVEL, используется Info", "input", levelStr)
+		}
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     slog.LevelInfo,
-		AddSource: true,
+		Level:     logLevel,
+		AddSource: true, // Добавляем источник (файл:строка) в логи
 	}))
 	slog.SetDefault(logger)
 	slog.Info("PVZ Service starting...")
@@ -107,17 +137,12 @@ func main() {
 	grpcListenAddr := ":" + grpcPort
 
 	// 2. Инициализация зависимостей
-	db, err := initDB()
+	db, err := initDB() // initDB теперь возвращает настроенный пул
 	if err != nil {
+		slog.Error("Ошибка инициализации базы данных", "error", err) // Добавим логирование ошибки из initDB
 		os.Exit(1)
 	}
-	defer func() {
-		slog.Info("Закрытие пула соединений с БД...")
-		if err := db.Close(); err != nil {
-			slog.Error("Ошибка при закрытии пула соединений с БД", "error", err)
-		}
-	}()
-	slog.Info("Пул соединений с БД инициализирован.")
+	// db будет закрыт в defer ниже, после инициализации всех зависимостей
 
 	// Репозитории
 	pvzRepo := postgres.NewPVZRepo(db)
@@ -135,14 +160,25 @@ func main() {
 	apiHandler := api.NewHandler(db, authService, pvzService, receptionService)
 	slog.Info("API Handler инициализирован.")
 
+	// Отложенное закрытие БД - выполняется при выходе из main
+	defer func() {
+		slog.Info("Закрытие пула соединений с БД...")
+		if err := db.Close(); err != nil {
+			slog.Error("Ошибка при закрытии пула соединений с БД", "error", err)
+		} else {
+			slog.Info("Пул соединений с БД успешно закрыт.")
+		}
+	}()
+
 	// 3. Настройка роутера chi для HTTP API
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(api.SlogMiddleware(logger))
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
-	r.Use(api.PrometheusMiddleware)
+	// Middleware в порядке их выполнения
+	r.Use(middleware.RequestID)                 // Добавляет RequestID в контекст
+	r.Use(middleware.RealIP)                    // Определяет реальный IP клиента (учитывая прокси)
+	r.Use(api.SlogMiddleware(logger))           // Логирование запросов с использованием slog
+	r.Use(middleware.Recoverer)                 // Перехватывает паники и возвращает 500
+	r.Use(middleware.Timeout(60 * time.Second)) // Устанавливает таймаут на обработку запроса
+	r.Use(api.PrometheusMiddleware)             // Собирает метрики Prometheus для HTTP запросов
 	slog.Info("Роутер и базовые middleware для HTTP API настроены.")
 
 	// 4. Регистрация HTTP маршрутов
@@ -152,16 +188,25 @@ func main() {
 	r.Post("/dummyLogin", apiHandler.HandleDummyLogin)
 	r.Post("/register", apiHandler.HandleRegister)
 	r.Post("/login", apiHandler.HandleLogin)
-	// Защищенные
+
+	// Маршрут для метрик Prometheus
+	// Важно: он должен быть вне группы с AuthMiddleware!
+	r.Handle("/metrics", promhttp.Handler())
+
+	// Защищенные маршруты
 	r.Group(func(r chi.Router) {
-		r.Use(api.AuthMiddleware(authService))
+		r.Use(api.AuthMiddleware(authService)) // Middleware аутентификации
+
+		// Маршруты, доступные всем аутентифицированным пользователям
 		r.Get("/pvz", apiHandler.HandleListPVZ)
 		r.Post("/receptions", apiHandler.HandleInitiateReception)
 		r.Post("/products", apiHandler.HandleAddProduct)
 		r.Post("/pvz/{pvzId}/delete_last_product", apiHandler.HandleDeleteLastProduct)
 		r.Post("/pvz/{pvzId}/close_last_reception", apiHandler.HandleCloseLastReception)
+
+		// Маршруты, доступные только модераторам
 		r.Group(func(r chi.Router) {
-			r.Use(api.RoleMiddleware(domain.RoleModerator)) // Используем константу из domain
+			r.Use(api.RoleMiddleware(domain.RoleModerator)) // Middleware проверки роли
 			r.Post("/pvz", apiHandler.HandleCreatePVZ)
 		})
 	})
@@ -173,9 +218,16 @@ func main() {
 	// 5. Запуск HTTP-сервера для метрик Prometheus (в горутине)
 	go func() {
 		metricsServer := &http.Server{
-			Addr:    metricsAddr,
-			Handler: promhttp.Handler(),
+			Addr:              metricsAddr,
+			Handler:           http.NotFoundHandler(), // Основной обработчик не нужен, т.к. /metrics регистрируется выше
+			ReadHeaderTimeout: 5 * time.Second,        // Добавим таймауты
 		}
+		// Создаем отдельный ServeMux ТОЛЬКО для метрик,
+		// чтобы middleware основного роутера не применялись к /metrics
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", promhttp.Handler()) // Регистрируем обработчик метрик
+		metricsServer.Handler = metricsMux                // Используем этот mux
+
 		slog.Info("Starting metrics server", "address", metricsServer.Addr)
 		// Отправляем ошибку в канал, если сервер упал
 		errChan <- metricsServer.ListenAndServe()
@@ -186,10 +238,17 @@ func main() {
 		lis, err := net.Listen("tcp", grpcListenAddr)
 		if err != nil {
 			slog.Error("Failed to listen for gRPC", "address", grpcListenAddr, "error", err)
-			errChan <- err // Отправляем ошибку в канал
+			errChan <- fmt.Errorf("gRPC listen error: %w", err) // Оборачиваем ошибку
 			return
 		}
-		defer lis.Close()
+		// Отложенное закрытие листенера
+		defer func() {
+			if err := lis.Close(); err != nil {
+				slog.Error("Error closing gRPC listener", "error", err)
+			} else {
+				slog.Info("gRPC listener closed")
+			}
+		}()
 
 		pvzGrpcServerImpl := grpcServer.NewPVZServer(pvzRepo)   // Создаем реализацию сервиса
 		grpcSrv := grpc.NewServer()                             // Создаем gRPC сервер
@@ -197,32 +256,51 @@ func main() {
 
 		slog.Info("Starting gRPC server", "address", lis.Addr().String())
 		// Отправляем ошибку в канал, если сервер упал
-		errChan <- grpcSrv.Serve(lis)
+		err = grpcSrv.Serve(lis)
+		if err != nil {
+			slog.Error("gRPC server failed", "error", err)
+			errChan <- fmt.Errorf("gRPC serve error: %w", err)
+		} else {
+			// Если Serve завершился без ошибки (например, через GracefulStop),
+			// можно отправить nil или специальный маркер, если нужно.
+			// Пока просто логируем.
+			slog.Info("gRPC server stopped gracefully")
+		}
 	}()
 
 	// 7. Запуск основного HTTP-сервера API (в горутине)
 	go func() {
 		httpServer := &http.Server{
-			Addr:    apiAddr,
-			Handler: r,
+			Addr:              apiAddr,
+			Handler:           r,                // Используем настроенный chi роутер
+			ReadTimeout:       10 * time.Second, // Добавим таймауты
+			ReadHeaderTimeout: 5 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		}
 		slog.Info("Starting API server", "address", httpServer.Addr)
 		// Отправляем ошибку в канал, если сервер упал
-		errChan <- httpServer.ListenAndServe()
+		err := httpServer.ListenAndServe()
+		// ListenAndServe всегда возвращает не-nil ошибку
+		if err != http.ErrServerClosed {
+			slog.Error("API server failed", "error", err)
+			errChan <- fmt.Errorf("API server error: %w", err)
+		} else {
+			slog.Info("API server stopped gracefully")
+		}
 	}()
 
 	// 8. Ожидание ошибки от любого из серверов
 	slog.Info("Application started. Waiting for errors...")
 	serverErr := <-errChan // Блокируемся до получения первой ошибки
-	if serverErr != nil && serverErr != http.ErrServerClosed {
-		slog.Error("Server error received, shutting down", "error", serverErr)
-		// Здесь можно добавить логику graceful shutdown для остальных серверов,
-		// но для простоты просто выходим
-		os.Exit(1)
-	} else if serverErr == http.ErrServerClosed {
-		slog.Info("HTTP server closed gracefully (likely via shutdown signal not implemented here)")
-	}
+	slog.Error("Shutting down due to server error", "error", serverErr)
 
-	// Этот код ниже в простом варианте не достигнется, если нет graceful shutdown
-	slog.Info("PVZ Service stopped.")
+	// Здесь можно было бы добавить логику graceful shutdown для *остальных*
+	// серверов перед выходом, но для простоты пока опускаем.
+
+	// Выход с ошибкой (если сервер упал не штатно)
+	os.Exit(1)
+
+	// Этот код ниже не будет достигнут из-за os.Exit(1)
+	// slog.Info("PVZ Service stopped.")
 }

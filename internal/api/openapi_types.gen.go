@@ -101,10 +101,10 @@ type Product struct {
 	Id *openapi_types.UUID `json:"id,omitempty"`
 
 	// ReceptionId ID приемки, к которой относится товар
-	ReceptionId openapi_types.UUID `json:"receptionId"`
+	ReceptionId *openapi_types.UUID `json:"receptionId,omitempty"`
 
 	// Type Тип товара
-	Type ProductType `json:"type"`
+	Type *ProductType `json:"type,omitempty"`
 }
 
 // ProductInfo Товар, принятый в ПВЗ
@@ -120,18 +120,15 @@ type PvzListItem struct {
 	Receptions []ReceptionInfo `json:"receptions"`
 }
 
-// PvzListResponse Ответ со списком ПВЗ, пагинацией и деталями приемок/товаров
-type PvzListResponse struct {
+// PvzListResponseKeyset Ответ со списком ПВЗ и курсором для следующей страницы
+type PvzListResponseKeyset struct {
 	Items []PvzListItem `json:"items"`
 
-	// Limit Количество элементов на странице
-	Limit int `json:"limit"`
+	// NextAfterId Курсор для следующей страницы: id последнего элемента
+	NextAfterId *openapi_types.UUID `json:"next_after_id"`
 
-	// Page Номер текущей страницы (начиная с 1)
-	Page int `json:"page"`
-
-	// TotalCount Общее количество ПВЗ, доступных по запросу (без учета пагинации)
-	TotalCount int `json:"totalCount"`
+	// NextAfterRegistrationDate Курсор для следующей страницы: registration_date последнего элемента
+	NextAfterRegistrationDate *time.Time `json:"next_after_registration_date"`
 }
 
 // Reception Запись о приемке товаров
@@ -143,10 +140,10 @@ type Reception struct {
 	Id *openapi_types.UUID `json:"id,omitempty"`
 
 	// PvzId ID пункта выдачи заказов, к которому относится приемка
-	PvzId openapi_types.UUID `json:"pvzId"`
+	PvzId *openapi_types.UUID `json:"pvzId,omitempty"`
 
 	// Status Статус приемки товаров
-	Status ReceptionStatus `json:"status"`
+	Status *ReceptionStatus `json:"status,omitempty"`
 }
 
 // ReceptionInfo Информация о приемке, включая список товаров, для ответа списка ПВЗ
@@ -187,19 +184,22 @@ type User struct {
 // UserRole Роль пользователя в системе
 type UserRole string
 
-// GetPvzListParams defines parameters for GetPvzList.
-type GetPvzListParams struct {
+// GetPvzListKeysetParams defines parameters for GetPvzListKeyset.
+type GetPvzListKeysetParams struct {
 	// StartDate Начальная дата диапазона (фильтр для приемок)
 	StartDate *time.Time `form:"startDate,omitempty" json:"startDate,omitempty"`
 
 	// EndDate Конечная дата диапазона (фильтр для приемок)
 	EndDate *time.Time `form:"endDate,omitempty" json:"endDate,omitempty"`
 
-	// Page Номер страницы
-	Page *int `form:"page,omitempty" json:"page,omitempty"`
-
 	// Limit Количество элементов на странице
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// AfterRegistrationDate Курсор: Дата регистрации последнего элемента предыдущей страницы (RFC3339)
+	AfterRegistrationDate *time.Time `form:"after_registration_date,omitempty" json:"after_registration_date,omitempty"`
+
+	// AfterId Курсор: ID последнего элемента предыдущей страницы (для уникальности)
+	AfterId *openapi_types.UUID `form:"after_id,omitempty" json:"after_id,omitempty"`
 }
 
 // PostDummyLoginJSONRequestBody defines body for PostDummyLogin for application/json ContentType.

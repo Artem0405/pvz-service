@@ -11,389 +11,368 @@ import (
 
 	"github.com/Artem0405/pvz-service/internal/api"
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/assert" // Можно вернуть для не-статус-код проверок
+
+	// Используем только require для прерывания теста при критических ошибках
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 const (
 	baseURL       = "http://localhost:8080"
-	clientTimeout = 30 * time.Second // Увеличим таймаут, так как будет больше запросов
+	clientTimeout = 30 * time.Second
 )
 
+// Структура для ответа с токеном
 type TokenResponse struct {
 	Token string `json:"token"`
 }
 
+// Основной интеграционный тест
 func TestIntegrationScenario(t *testing.T) {
-	require := require.New(t) // Внешний require
-	assert.New(t)             // Внешний assert
+	require := require.New(t) // Внешний require для всего теста
 
 	client := &http.Client{
 		Timeout: clientTimeout,
 	}
 
+	// Переменные для хранения данных между шагами
 	var moderatorToken string
 	var employeeToken string
 	var createdPvzId uuid.UUID
 	var createdReceptionId uuid.UUID
-	var lastCreatedProductId uuid.UUID // Будем хранить ID последнего добавленного товара
+	var lastCreatedProductId uuid.UUID
 
 	// --- Шаг 0: Получение Тестовых Токенов ---
-	t.Run("Step 0: Get Tokens", func(innerT *testing.T) {
-		// Модератор
-		modLoginReq := api.DummyLoginRequest{Role: "moderator"}
+	t.Run("Get Tokens", func(t *testing.T) {
+		// --- Модератор ---
+		modLoginReq := api.DummyLoginRequest{Role: api.Moderator}
 		modBodyBytes, err := json.Marshal(modLoginReq)
-		require.NoError(err, innerT)
-		statusCode, modRespBody := sendRequest(innerT, client, "POST", baseURL+"/dummyLogin", nil, bytes.NewReader(modBodyBytes))
+		require.NoError(err, t, "Get Tokens: Failed to marshal moderator request") // Прерываем, если маршалинг не удался
+		statusCode, modRespBody := sendRequest(t, client, "POST", baseURL+"/dummyLogin", nil, bytes.NewReader(modBodyBytes))
+
+		// Ручная проверка статус кода с прерыванием при ошибке
 		if statusCode != http.StatusOK {
-			innerT.Fatalf("Dummy login moderator failed: expected status %d, got %d", http.StatusOK, statusCode)
+			require.FailNowf("Get Tokens: Dummy login moderator failed", "Expected status %d, got %d. Body: %s", http.StatusOK, t, statusCode, string(modRespBody))
 		}
+
 		var modTokenResp TokenResponse
 		err = json.Unmarshal(modRespBody, &modTokenResp)
-		require.NoError(err, innerT)
-		require.NotEmpty(innerT, modTokenResp.Token)
+		require.NoError(err, t, "Get Tokens: Failed to unmarshal moderator token response")
+		require.NotEmpty(t, modTokenResp.Token, "Get Tokens: Moderator token is empty")
 		moderatorToken = modTokenResp.Token
-		innerT.Logf("Received moderator token starting with: %s...", moderatorToken[:min(10, len(moderatorToken))])
+		t.Logf("Received moderator token starting with: %s...", moderatorToken[:min(10, len(moderatorToken))])
 
-		// Сотрудник
-		empLoginReq := api.DummyLoginRequest{Role: "employee"}
+		// --- Сотрудник ---
+		empLoginReq := api.DummyLoginRequest{Role: api.Employee}
 		empBodyBytes, err := json.Marshal(empLoginReq)
-		require.NoError(err, innerT)
-		statusCode, empRespBody := sendRequest(innerT, client, "POST", baseURL+"/dummyLogin", nil, bytes.NewReader(empBodyBytes))
+		require.NoError(err, t, "Get Tokens: Failed to marshal employee request")
+		statusCode, empRespBody := sendRequest(t, client, "POST", baseURL+"/dummyLogin", nil, bytes.NewReader(empBodyBytes))
+
 		if statusCode != http.StatusOK {
-			innerT.Fatalf("Dummy login employee failed: expected status %d, got %d", http.StatusOK, statusCode)
+			require.FailNowf("Get Tokens: Dummy login employee failed", "Expected status %d, got %d. Body: %s", http.StatusOK, t, statusCode, string(empRespBody))
 		}
+
 		var empTokenResp TokenResponse
 		err = json.Unmarshal(empRespBody, &empTokenResp)
-		require.NoError(err, innerT)
-		require.NotEmpty(innerT, empTokenResp.Token)
+		require.NoError(err, t, "Get Tokens: Failed to unmarshal employee token response")
+		require.NotEmpty(t, empTokenResp.Token, "Get Tokens: Employee token is empty")
 		employeeToken = empTokenResp.Token
-		innerT.Logf("Received employee token starting with: %s...", employeeToken[:min(10, len(employeeToken))])
+		t.Logf("Received employee token starting with: %s...", employeeToken[:min(10, len(employeeToken))])
 	})
 
-	require.NotEmpty(t, moderatorToken)
-	require.NotEmpty(t, employeeToken)
+	// Проверяем, что токены получены перед основными шагами
+	require.NotEmpty(t, moderatorToken, "Moderator token was not set after Get Tokens step")
+	require.NotEmpty(t, employeeToken, "Employee token was not set after Get Tokens step")
 
 	// --- Шаг 1: Создание ПВЗ (Модератор) ---
-	t.Run("Step 1: Create PVZ (Moderator)", func(innerT *testing.T) {
+	t.Run("Create PVZ (Moderator)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + moderatorToken}
 		createPvzReq := api.PVZ{City: api.Казань}
 		bodyBytes, err := json.Marshal(createPvzReq)
-		require.NoError(err, innerT)
-		statusCode, respBody := sendRequest(innerT, client, "POST", baseURL+"/pvz", headers, bytes.NewReader(bodyBytes))
+		require.NoError(err, t, "Create PVZ: Failed to marshal request")
+		statusCode, respBody := sendRequest(t, client, "POST", baseURL+"/pvz", headers, bytes.NewReader(bodyBytes))
+
 		if statusCode != http.StatusCreated {
-			innerT.Fatalf("Failed to create PVZ: expected status %d, got %d", http.StatusCreated, statusCode)
+			require.FailNowf("Create PVZ: Failed to create PVZ", "Expected status %d, got %d. Body: %s", http.StatusCreated, t, statusCode, string(respBody))
 		}
+
 		var createdPvz api.PVZ
 		err = json.Unmarshal(respBody, &createdPvz)
-		require.NoError(err, innerT)
-		require.NotNil(innerT, createdPvz.Id)
-		require.NotEqual(innerT, uuid.Nil, *createdPvz.Id)
-		// Используем assert для некритичных проверок
+		require.NoError(err, t, "Create PVZ: Failed to unmarshal response")
+		require.NotNil(t, createdPvz.Id, "Create PVZ: Created PVZ ID is nil")
+		if *createdPvz.Id == uuid.Nil {
+			require.FailNow("Create PVZ: Created PVZ ID is zero UUID", t)
+		}
 		if createdPvz.City != api.Казань {
-			innerT.Errorf("Created PVZ city mismatch: expected %s, got %s", api.Казань, createdPvz.City)
+			t.Errorf("Create PVZ: City mismatch: expected %s, got %s", api.Казань, createdPvz.City)
 		}
 		if createdPvz.RegistrationDate == nil {
-			innerT.Errorf("Created PVZ registration date should not be nil")
+			t.Errorf("Create PVZ: Registration date should not be nil")
 		}
+
 		createdPvzId = *createdPvz.Id
-		innerT.Logf("PVZ created successfully with ID: %s", createdPvzId)
+		t.Logf("PVZ created successfully with ID: %s", createdPvzId)
 	})
 
-	require.NotEqual(t, uuid.Nil, createdPvzId)
+	require.NotEqual(t, uuid.Nil, createdPvzId, "PVZ ID was not set after creation step")
 
 	// --- Шаг 1b: Попытка Создания ПВЗ (Сотрудник - Ошибка) ---
-	t.Run("Step 1b: Fail Create PVZ (Employee)", func(innerT *testing.T) {
+	t.Run("Fail Create PVZ (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
 		createPvzReq := api.PVZ{City: api.Москва}
 		bodyBytes, err := json.Marshal(createPvzReq)
-		require.NoError(err, innerT)
-		statusCode, _ := sendRequest(innerT, client, "POST", baseURL+"/pvz", headers, bytes.NewReader(bodyBytes))
+		require.NoError(err, t, "Fail Create PVZ: Failed to marshal request")
+		statusCode, _ := sendRequest(t, client, "POST", baseURL+"/pvz", headers, bytes.NewReader(bodyBytes))
+
 		if statusCode != http.StatusForbidden {
-			innerT.Errorf("Employee should not be able to create PVZ: expected status %d, got %d", http.StatusForbidden, statusCode)
+			// Используем Errorf, так как это проверка ожидаемой ошибки, тест не должен падать
+			t.Errorf("Fail Create PVZ: Employee should not be able to create PVZ: expected status %d, got %d", http.StatusForbidden, statusCode)
 		} else {
-			innerT.Log("Verified employee cannot create PVZ (403 Forbidden)")
+			t.Log("Verified employee cannot create PVZ (403 Forbidden)")
 		}
 	})
 
 	// --- Шаг 2: Инициация Приемки (Сотрудник) ---
-	t.Run("Step 2: Initiate Reception (Employee)", func(innerT *testing.T) {
+	t.Run("Initiate Reception (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
-		initRecReq := api.PostReceptionsJSONRequestBody{PvzId: createdPvzId}
+		initRecReq := api.InitiateReceptionRequest{PvzId: createdPvzId}
 		bodyBytes, err := json.Marshal(initRecReq)
-		require.NoError(err, innerT)
-		statusCode, respBody := sendRequest(innerT, client, "POST", baseURL+"/receptions", headers, bytes.NewReader(bodyBytes))
+		require.NoError(err, t, "Initiate Reception: Failed to marshal request")
+		statusCode, respBody := sendRequest(t, client, "POST", baseURL+"/receptions", headers, bytes.NewReader(bodyBytes))
+
 		if statusCode != http.StatusCreated {
-			innerT.Fatalf("Failed to initiate reception: expected status %d, got %d", http.StatusCreated, statusCode)
+			require.FailNowf("Initiate Reception: Failed to initiate reception", "Expected status %d, got %d. Body: %s", http.StatusCreated, t, statusCode, string(respBody))
 		}
+
 		var createdRec api.Reception
 		err = json.Unmarshal(respBody, &createdRec)
-		require.NoError(err, innerT)
-		require.NotNil(innerT, createdRec.Id)
-		require.NotEqual(innerT, uuid.Nil, *createdRec.Id)
-		if createdRec.PvzId != createdPvzId {
-			innerT.Errorf("Reception PVZ ID mismatch: expected %s, got %s", createdPvzId, createdRec.PvzId)
+		require.NoError(err, t, "Initiate Reception: Failed to unmarshal response")
+		require.NotNil(t, createdRec.Id, "Initiate Reception: Created Reception ID is nil")
+		if *createdRec.Id == uuid.Nil {
+			require.FailNow("Initiate Reception: Created Reception ID is zero UUID", t)
 		}
-		if createdRec.Status != api.InProgress {
-			innerT.Errorf("Reception status mismatch: expected %s, got %s", api.InProgress, createdRec.Status)
+		require.NotNil(t, createdRec.PvzId, "Initiate Reception: Created Reception PVZ ID is nil")
+		require.NotNil(t, createdRec.Status, "Initiate Reception: Created Reception Status is nil")
+		if *createdRec.PvzId != createdPvzId {
+			t.Errorf("Initiate Reception: PVZ ID mismatch: expected %s, got %s", createdPvzId, *createdRec.PvzId)
+		}
+		if *createdRec.Status != api.InProgress {
+			t.Errorf("Initiate Reception: status mismatch: expected %s, got %s", api.InProgress, *createdRec.Status)
 		}
 		if createdRec.DateTime == nil {
-			innerT.Errorf("Reception DateTime should not be nil")
+			t.Errorf("Initiate Reception: DateTime should not be nil")
 		}
+
 		createdReceptionId = *createdRec.Id
-		innerT.Logf("Reception initiated successfully with ID: %s", createdReceptionId)
+		t.Logf("Reception initiated successfully with ID: %s", createdReceptionId)
 	})
 
-	require.NotEqual(t, uuid.Nil, createdReceptionId)
+	require.NotEqual(t, uuid.Nil, createdReceptionId, "Reception ID was not set after initiation step")
 
 	// --- Шаг 3: Добавление 50 Товаров (Сотрудник) ---
-	// ***** МОДИФИКАЦИЯ ЗДЕСЬ *****
-	t.Run("Step 3: Add 50 Products (Employee)", func(innerT *testing.T) {
+	t.Run("Add 50 Products (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
-		// Используем один тип товара для простоты
 		productType := api.Одежда
 
-		innerT.Logf("Starting to add 50 products of type %s...", productType)
+		t.Logf("Starting to add 50 products of type %s...", productType)
+		var lastAddedProd *api.Product
 
 		for i := 0; i < 50; i++ {
-			addProdReq := api.PostProductsJSONRequestBody{PvzId: createdPvzId, Type: productType}
+			addProdReq := api.AddProductRequest{PvzId: createdPvzId, Type: productType}
 			bodyBytes, err := json.Marshal(addProdReq)
-			// Используем require.NoError, т.к. ошибка маршалинга критична
-			require.NoError(err, innerT, "Failed to marshal add product request for item %d", i+1)
+			require.NoError(err, t, "Add Products: Failed to marshal request for item %d", i+1)
 
-			statusCode, respBody := sendRequest(innerT, client, "POST", baseURL+"/products", headers, bytes.NewReader(bodyBytes))
+			statusCode, respBody := sendRequest(t, client, "POST", baseURL+"/products", headers, bytes.NewReader(bodyBytes))
 
-			// Ручная проверка статус кода
 			if statusCode != http.StatusCreated {
-				var errResp api.Error
-				_ = json.Unmarshal(respBody, &errResp)
-				// Используем Fatalf, так как если один товар не добавился, продолжать бессмысленно
-				innerT.Fatalf("Failed to add product %d: expected status %d, got %d. Response body: %s",
-					i+1, http.StatusCreated, statusCode, string(respBody))
+				require.FailNowf("Add Products: Failed to add product", "Item %d: expected status %d, got %d. Body: %s", i+1, http.StatusCreated, t, statusCode, string(respBody))
 			}
 
-			// Проверяем ответ (необязательно, но полезно)
 			var addedProd api.Product
 			err = json.Unmarshal(respBody, &addedProd)
-			require.NoError(err, innerT, "Failed to unmarshal add product response for item %d", i+1)
-			require.NotNil(innerT, addedProd.Id, "Added Product ID is nil for item %d", i+1)
-			require.NotEqual(innerT, uuid.Nil, *addedProd.Id, "Added Product ID is zero UUID for item %d", i+1)
-
-			// Проверяем детали последнего добавленного товара (необязательно)
-			if i == 49 { // Проверяем только последний для примера
-				if addedProd.ReceptionId != createdReceptionId {
-					innerT.Errorf("Last Product Reception ID mismatch: expected %s, got %s", createdReceptionId, addedProd.ReceptionId)
-				}
-				if addedProd.Type != productType {
-					innerT.Errorf("Last Product Type mismatch: expected %s, got %s", productType, addedProd.Type)
-				}
-				if addedProd.DateTimeAdded == nil {
-					innerT.Errorf("Last Product DateTimeAdded should not be nil")
-				}
+			require.NoError(err, t, "Add Products: Failed to unmarshal response for item %d", i+1)
+			require.NotNil(t, addedProd.Id, "Add Products: Added Product ID is nil for item %d", i+1)
+			if *addedProd.Id == uuid.Nil {
+				t.Fatalf("Add Products: Added Product ID is zero UUID for item %d", i+1)
 			}
 
-			// Сохраняем ID *последнего* добавленного товара
+			lastAddedProd = &addedProd
 			lastCreatedProductId = *addedProd.Id
 
-			// Логируем прогресс (не для каждого товара, чтобы не засорять вывод)
 			if (i+1)%10 == 0 {
-				innerT.Logf("Added product %d of 50...", i+1)
+				t.Logf("Added product %d of 50...", i+1)
 			}
 		}
-		innerT.Logf("Successfully added 50 products. Last product ID: %s", lastCreatedProductId)
-	}) // <--- Закрытие t.Run Шага 3
+		t.Logf("Successfully added 50 products. Last product ID: %s", lastCreatedProductId)
 
-	// Проверяем, что ID последнего товара был сохранен
-	require.NotEqual(t, uuid.Nil, lastCreatedProductId, "Last Product ID was not set after adding 50 products")
+		// Проверяем поля последнего добавленного товара
+		require.NotNil(t, lastAddedProd, "Add Products: Last added product pointer should not be nil")
+		if lastAddedProd.ReceptionId == nil {
+			t.Errorf("Add Products: Last Product Reception ID is nil")
+		} else if *lastAddedProd.ReceptionId != createdReceptionId {
+			t.Errorf("Add Products: Last Product Reception ID mismatch: expected %s, got %s", createdReceptionId, *lastAddedProd.ReceptionId)
+		}
+		if lastAddedProd.Type == nil {
+			t.Errorf("Add Products: Last Product Type is nil")
+		} else if *lastAddedProd.Type != productType {
+			t.Errorf("Add Products: Last Product Type mismatch: expected %s, got %s", productType, *lastAddedProd.Type)
+		}
+		if lastAddedProd.DateTimeAdded == nil {
+			t.Errorf("Add Products: Last Product DateTimeAdded should not be nil")
+		}
+	})
+
+	require.NotEqual(t, uuid.Nil, lastCreatedProductId, "Last Product ID was not set after adding products")
 
 	// --- Шаг 4: Удаление Последнего Товара (Сотрудник) ---
-	t.Run("Step 4: Delete Last Product (Employee)", func(innerT *testing.T) {
+	t.Run("Delete Last Product (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
 		url := fmt.Sprintf("%s/pvz/%s/delete_last_product", baseURL, createdPvzId)
-		statusCode, respBody := sendRequest(innerT, client, "POST", url, headers, nil)
+		statusCode, respBody := sendRequest(t, client, "POST", url, headers, nil)
+
 		if statusCode != http.StatusOK {
-			innerT.Fatalf("Failed to delete last product: expected status %d, got %d", http.StatusOK, statusCode)
+			require.FailNowf("Delete Last Product: Failed to delete", "Expected status %d, got %d. Body: %s", http.StatusOK, t, statusCode, string(respBody))
 		}
-		var msgResp api.Error
+
+		var msgResp api.MessageResponse
 		err := json.Unmarshal(respBody, &msgResp)
-		require.NoError(err, innerT)
+		require.NoError(err, t, "Delete Last Product: Failed to unmarshal response")
 		expectedMsg := "Последний добавленный товар удален"
 		if msgResp.Message != expectedMsg {
-			innerT.Errorf("Delete product message mismatch: expected '%s', got '%s'", expectedMsg, msgResp.Message)
+			t.Errorf("Delete Last Product: Message mismatch: expected '%s', got '%s'", expectedMsg, msgResp.Message)
 		}
-		innerT.Log("Last product (one of 50) deleted successfully") // Уточняем лог
+		t.Log("Last product deleted successfully")
 	})
 
 	// --- Шаг 5: Закрытие Приемки (Сотрудник) ---
-	t.Run("Step 5: Close Reception (Employee)", func(innerT *testing.T) {
+	t.Run("Close Reception (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
 		url := fmt.Sprintf("%s/pvz/%s/close_last_reception", baseURL, createdPvzId)
-		statusCode, respBody := sendRequest(innerT, client, "POST", url, headers, nil)
+		statusCode, respBody := sendRequest(t, client, "POST", url, headers, nil)
+
 		if statusCode != http.StatusOK {
-			innerT.Fatalf("Failed to close reception: expected status %d, got %d", http.StatusOK, statusCode)
+			require.FailNowf("Close Reception: Failed to close", "Expected status %d, got %d. Body: %s", http.StatusOK, t, statusCode, string(respBody))
 		}
+
 		var closedRec api.Reception
 		err := json.Unmarshal(respBody, &closedRec)
-		require.NoError(err, innerT)
-		require.NotNil(innerT, closedRec.Id)
+		require.NoError(err, t, "Close Reception: Failed to unmarshal response")
+		require.NotNil(t, closedRec.Id, "Close Reception: Closed reception ID is nil")
 		if *closedRec.Id != createdReceptionId {
-			innerT.Errorf("Closed reception ID mismatch: expected %s, got %s", createdReceptionId, *closedRec.Id)
+			t.Errorf("Close Reception: ID mismatch: expected %s, got %s", createdReceptionId, *closedRec.Id)
 		}
-		if closedRec.Status != api.Closed {
-			innerT.Errorf("Reception status mismatch: expected %s, got %s", api.Closed, closedRec.Status)
+		require.NotNil(t, closedRec.Status, "Close Reception: Status is nil")
+		if *closedRec.Status != api.Closed {
+			t.Errorf("Close Reception: Status mismatch: expected %s, got %s", api.Closed, *closedRec.Status)
 		}
-		innerT.Logf("Reception closed successfully with ID: %s", *closedRec.Id)
+		t.Logf("Reception closed successfully with ID: %s", *closedRec.Id)
 	})
 
 	// --- Шаг 6: Получение Списка ПВЗ (Сотрудник) ---
-	t.Run("Step 6: List PVZ (Employee)", func(innerT *testing.T) {
+	t.Run("List PVZ (Employee)", func(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + employeeToken}
-		url := fmt.Sprintf("%s/pvz?page=1&limit=10", baseURL)
-		statusCode, respBody := sendRequest(innerT, client, "GET", url, headers, nil)
-		innerT.Logf("List PVZ response status code: %d", statusCode)
-		if statusCode != http.StatusOK {
-			innerT.Fatalf("Failed to list PVZ: expected status %d, got %d", http.StatusOK, statusCode)
-		}
-		innerT.Log("List PVZ status code check passed.")
-		var listResp api.PvzListResponse
-		err := json.Unmarshal(respBody, &listResp)
-		require.NoError(err, innerT, "Failed to unmarshal PVZ list response")
+		url := fmt.Sprintf("%s/pvz?limit=10", baseURL) // Keyset - первая страница
+		statusCode, respBody := sendRequest(t, client, "GET", url, headers, nil)
 
-		// Ручные проверки
-		if listResp.TotalCount < 1 {
-			innerT.Errorf("Total count should be at least 1, got %d", listResp.TotalCount)
+		if !assert.True(t, http.StatusOK == statusCode, fmt.Sprintf("List PVZ: Failed to list PVZ: expected status %d, got %d", http.StatusOK, statusCode)) {
+			// Если проверка не удалась, останавливаем тест этого шага
+			require.FailNowf("Stopping test due to status code mismatch", "Expected %d, got %d", http.StatusOK, t, statusCode)
 		}
-		if listResp.Page != 1 {
-			innerT.Errorf("Page number mismatch: expected 1, got %d", listResp.Page)
-		}
-		if listResp.Limit != 10 {
-			innerT.Errorf("Limit mismatch: expected 10, got %d", listResp.Limit)
-		}
+
+		var listResp api.PvzListResponseKeyset
+		err := json.Unmarshal(respBody, &listResp)
+		require.NoError(err, t, "List PVZ: Failed to unmarshal response")
+
 		if len(listResp.Items) == 0 {
-			innerT.Errorf("PVZ list items should not be empty")
+			t.Errorf("List PVZ: List items should not be empty")
 		}
 
 		foundPvz := false
 		for i, item := range listResp.Items {
-			if item.Pvz.Id == nil {
-				innerT.Errorf("PVZ ID in list item %d should not be nil", i)
-				continue
-			}
+			require.NotNil(t, item.Pvz.Id, "List PVZ: Item %d: PVZ ID is nil", i)
 			if *item.Pvz.Id == createdPvzId {
 				foundPvz = true
 				if item.Pvz.City != api.Казань {
-					innerT.Errorf("PVZ city in list mismatch for PVZ ID %s: expected %s, got %s", createdPvzId, api.Казань, item.Pvz.City)
+					t.Errorf("List PVZ: PVZ %s: City mismatch: expected %s, got %s", createdPvzId, api.Казань, item.Pvz.City)
 				}
 				if len(item.Receptions) == 0 {
-					innerT.Errorf("Receptions for the created PVZ (ID: %s) should not be empty", createdPvzId)
+					t.Errorf("List PVZ: PVZ %s: Receptions should not be empty", createdPvzId)
 				}
 
 				foundReception := false
-				expectedProductCount := 49 // Ожидаем 49 товаров после удаления одного
+				expectedProductCount := 49 // 50 добавили, 1 удалили
 				for j, recInfo := range item.Receptions {
-					if recInfo.Reception.Id == nil {
-						innerT.Errorf("Reception ID in list item %d, reception %d should not be nil", i, j)
-						continue
-					}
+					require.NotNil(t, recInfo.Reception.Id, "List PVZ: Item %d, Reception %d: ID is nil", i, j)
 					if *recInfo.Reception.Id == createdReceptionId {
 						foundReception = true
-						if recInfo.Reception.Status != api.Closed {
-							innerT.Errorf("Reception status in list mismatch for Reception ID %s: expected %s, got %s", createdReceptionId, api.Closed, recInfo.Reception.Status)
+						require.NotNil(t, recInfo.Reception.Status, "List PVZ: Item %d, Reception %d: Status is nil", i, j)
+						if *recInfo.Reception.Status != api.Closed {
+							t.Errorf("List PVZ: Reception %s: Status mismatch: expected %s, got %s", createdReceptionId, api.Closed, *recInfo.Reception.Status)
 						}
-						// ***** МОДИФИКАЦИЯ ПРОВЕРКИ ЗДЕСЬ *****
-						if len(recInfo.Products) != expectedProductCount {
-							innerT.Errorf("Products count in the closed reception (ID: %s) mismatch: expected %d, got %d products", createdReceptionId, expectedProductCount, len(recInfo.Products))
+						actualProductCount := len(recInfo.Products)
+						if actualProductCount != expectedProductCount {
+							t.Errorf("List PVZ: Reception %s: Products count mismatch: expected %d, got %d", createdReceptionId, expectedProductCount, actualProductCount)
 						}
-						break
+						break // Нашли нужную приемку
 					}
 				}
 				if !foundReception {
-					innerT.Errorf("Created reception (ID: %s) was not found in the list for the PVZ (ID: %s)", createdReceptionId, createdPvzId)
+					t.Errorf("List PVZ: Created reception (ID: %s) was not found for PVZ (ID: %s)", createdReceptionId, createdPvzId)
 				}
-				break
+				break // Нашли нужный ПВЗ
 			}
 		}
 		if !foundPvz {
-			innerT.Errorf("Created PVZ (ID: %s) was not found in the list", createdPvzId)
+			t.Errorf("List PVZ: Created PVZ (ID: %s) was not found in the list", createdPvzId)
 		}
-		if innerT.Failed() {
-			innerT.Log("One or more checks failed in Step 6")
-		} else {
-			innerT.Log("PVZ list retrieved and validated (manually)")
-		}
-	}) // <--- ЗАКРЫТИЕ t.Run Шага 6
+		t.Log("PVZ list retrieved and validated")
+	})
 
 	// --- Шаг 7: Проверка Health Check ---
-	t.Run("Step 7: Health Check", func(innerT *testing.T) {
-		statusCode, respBody := sendRequest(innerT, client, "GET", baseURL+"/health", nil, nil)
-		innerT.Logf("Health Check response status code: %d", statusCode)
-		if statusCode != http.StatusOK {
-			innerT.Fatalf("Health check failed: expected status %d, got %d", http.StatusOK, statusCode)
+	t.Run("Health Check", func(t *testing.T) {
+		statusCode, respBody := sendRequest(t, client, "GET", baseURL+"/health", nil, nil)
+		if !assert.True(t, http.StatusOK == statusCode, fmt.Sprintf("Health check failed: expected %d, got %d", http.StatusOK, statusCode)) {
+			require.FailNowf("Stopping test due to status code mismatch in Health Check", "Expected %d, got %d", http.StatusOK, t, statusCode)
 		}
-		innerT.Log("Health Check status code check passed.")
-		require.NotEmpty(innerT, respBody)
+		require.NotEmpty(t, respBody, "Health check response body is empty")
+
 		var healthResp map[string]string
 		err := json.Unmarshal(respBody, &healthResp)
-		require.NoError(err, innerT)
-		expectedStatus := "ok"
-		if healthResp["status"] != expectedStatus {
-			innerT.Errorf("Health status mismatch: expected '%s', got '%s'", expectedStatus, healthResp["status"])
+		require.NoError(err, t, "Failed to unmarshal health response")
+		if healthResp["status"] != "ok" {
+			t.Errorf("Health status mismatch: expected 'ok', got '%s'", healthResp["status"])
 		}
-		expectedDBStatus := "up"
-		if healthResp["database"] != expectedDBStatus {
-			innerT.Errorf("Database status mismatch: expected '%s', got '%s'", expectedDBStatus, healthResp["database"])
+		if healthResp["database"] != "up" {
+			t.Errorf("Database status mismatch: expected 'up', got '%s'", healthResp["database"])
 		}
-		innerT.Log("Health check successful and validated")
-	}) // <--- ЗАКРЫТИЕ t.Run Шага 7
+		t.Log("Health check successful and validated")
+	})
+}
 
-} // <--- Закрытие func TestIntegrationScenario
-
-// ... функции sendRequest, min, TestSimpleAssert, TestBasicGoTest ...
-// (Они остаются без изменений)
-
-// sendRequest - вспомогательная функция
-func sendRequest(testContextT *testing.T, client *http.Client, method, url string, headers map[string]string, body io.Reader) (int, []byte) {
-	testContextT.Helper()
+// --- Вспомогательные функции ---
+func sendRequest(t *testing.T, client *http.Client, method, url string, headers map[string]string, body io.Reader) (int, []byte) {
+	// Используем require внутри хелпера, чтобы прерывать выполнение t.Run при ошибке запроса
+	localRequire := require.New(t)
+	t.Helper() // Помечаем как хелпер
 	req, err := http.NewRequest(method, url, body)
-	require.NoError(testContextT, err, "Failed to create request (%s %s)", method, url)
-	if body != nil {
+	localRequire.NoError(err, "Helper: Failed to create request (%s %s)", method, url)
+	if body != nil && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := client.Do(req)
-	require.NoError(testContextT, err, "Failed to execute request (%s %s)", method, url)
+	localRequire.NoError(err, "Helper: Failed to execute request (%s %s)", method, url)
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
-	require.NoError(testContextT, err, "Failed to read response body (%s %s)", method, url)
+	localRequire.NoError(err, "Helper: Failed to read response body (%s %s)", method, url)
 	return resp.StatusCode, respBody
 }
 
-// Вспомогательная функция для безопасного среза строки
 func min(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
-}
-
-// ----- Тестовые функции для диагностики -----
-func TestSimpleAssert(simpleT *testing.T) {
-	assert := assert.New(simpleT)
-	myBool := true
-	assert.True(myBool, simpleT, "This must pass")
-}
-
-func TestBasicGoTest(basicT *testing.T) {
-	myBool := true
-	if !myBool {
-		basicT.Errorf("Basic boolean check failed, expected true")
-	}
-	basicT.Log("Basic Go test checking 'true' passed.")
-	myFalseBool := false
-	if myFalseBool {
-		basicT.Errorf("Basic boolean check failed, expected false")
-	}
-	basicT.Log("Basic Go test checking 'false' passed.")
 }

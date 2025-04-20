@@ -3,9 +3,10 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt" // Для форматирования ошибок
-	"log" // Для логирования
+	"errors" // Теперь не используется для ListPVZs, но может понадобиться для других методов
+	"fmt"    // Для форматирования ошибок
+	"log"    // Для логирования (или slog, если хотите)
+	"time"   // Для *time.Time в сигнатуре
 
 	// Импортируем внутренний пакет с доменными моделями
 	"github.com/Artem0405/pvz-service/internal/domain"
@@ -22,8 +23,43 @@ type PVZRepo struct {
 	sq squirrel.StatementBuilderType // Экземпляр squirrel для построения запросов
 }
 
-// GetAllPVZs implements repository.PVZRepository.
-func (r *PVZRepo) GetAllPVZs(ctx context.Context) ([]domain.PVZ, error) {
+// AddProductToReception implements repository.ReceptionRepository.
+func (r *PVZRepo) AddProductToReception(ctx context.Context, product domain.Product) (uuid.UUID, error) {
+	panic("unimplemented")
+}
+
+// CloseReceptionByID implements repository.ReceptionRepository.
+func (r *PVZRepo) CloseReceptionByID(ctx context.Context, receptionID uuid.UUID) error {
+	panic("unimplemented")
+}
+
+// CreateReception implements repository.ReceptionRepository.
+func (r *PVZRepo) CreateReception(ctx context.Context, reception domain.Reception) (uuid.UUID, error) {
+	panic("unimplemented")
+}
+
+// DeleteProductByID implements repository.ReceptionRepository.
+func (r *PVZRepo) DeleteProductByID(ctx context.Context, productID uuid.UUID) error {
+	panic("unimplemented")
+}
+
+// GetLastOpenReceptionByPVZ implements repository.ReceptionRepository.
+func (r *PVZRepo) GetLastOpenReceptionByPVZ(ctx context.Context, pvzID uuid.UUID) (domain.Reception, error) {
+	panic("unimplemented")
+}
+
+// GetLastProductFromReception implements repository.ReceptionRepository.
+func (r *PVZRepo) GetLastProductFromReception(ctx context.Context, receptionID uuid.UUID) (domain.Product, error) {
+	panic("unimplemented")
+}
+
+// ListProductsByReceptionIDs implements repository.ReceptionRepository.
+func (r *PVZRepo) ListProductsByReceptionIDs(ctx context.Context, receptionIDs []uuid.UUID) ([]domain.Product, error) {
+	panic("unimplemented")
+}
+
+// ListReceptionsByPVZIDs implements repository.ReceptionRepository.
+func (r *PVZRepo) ListReceptionsByPVZIDs(ctx context.Context, pvzIDs []uuid.UUID, startDate *time.Time, endDate *time.Time) ([]domain.Reception, error) {
 	panic("unimplemented")
 }
 
@@ -41,117 +77,136 @@ func NewPVZRepo(db *sql.DB) *PVZRepo {
 // Генерирует UUID для нового ПВЗ.
 // Возвращает сгенерированный UUID или ошибку.
 func (r *PVZRepo) CreatePVZ(ctx context.Context, pvz domain.PVZ) (uuid.UUID, error) {
-	// Генерируем новый уникальный ID для записи
-	pvz.ID = uuid.New()
+	// Генерируем новый уникальный ID для записи, если он не предоставлен
+	if pvz.ID == uuid.Nil {
+		pvz.ID = uuid.New()
+	}
 
 	// Строим SQL запрос INSERT с помощью squirrel
 	sqlQuery, args, err := r.sq.
-		Insert("pvz").            // Указываем таблицу
-		Columns("id", "city").    // Перечисляем колонки для вставки (registration_date имеет DEFAULT NOW())
-		Values(pvz.ID, pvz.City). // Указываем значения
-		ToSql()                   // Генерируем SQL строку и аргументы
+		Insert("pvz").
+		Columns("id", "city"). // registration_date имеет DEFAULT NOW()
+		Values(pvz.ID, pvz.City).
+		ToSql()
 	if err != nil {
-		// Ошибка на этапе построения запроса - маловероятна для такого простого запроса
 		return uuid.Nil, fmt.Errorf("ошибка построения SQL запроса для создания ПВЗ: %w", err)
 	}
 
 	// Выполняем SQL запрос к базе данных
 	_, err = r.db.ExecContext(ctx, sqlQuery, args...)
 	if err != nil {
-		// Здесь могут быть различные ошибки БД: нарушение ограничений (CHECK на city),
-		// проблемы с соединением, нарушение уникальности (если бы оно было на city) и т.д.
-		// TODO: Рассмотреть возможность обработки специфических ошибок PostgreSQL (например, по коду ошибки)
+		// TODO: Рассмотреть возможность обработки специфических ошибок PostgreSQL
 		return uuid.Nil, fmt.Errorf("ошибка выполнения SQL запроса для создания ПВЗ: %w", err)
 	}
 
-	// Возвращаем ID успешно созданного ПВЗ
 	return pvz.ID, nil
 }
 
-// ListPVZs - получает список ПВЗ из базы данных с пагинацией.
-// Возвращает срез domain.PVZ для текущей страницы,
-// общее количество ПВЗ в базе данных (для пагинации на клиенте/в сервисе)
-// и ошибку, если что-то пошло не так.
-// internal/repository/postgres/pvz_repo.go
+// ListPVZs - получает список ПВЗ из базы данных с использованием keyset pagination.
+// Принимает лимит и опциональные курсоры (дата и ID последнего элемента предыдущей страницы).
+// Возвращает срез domain.PVZ для текущей страницы и ошибку.
+// Подсчет totalCount больше не выполняется.
+func (r *PVZRepo) ListPVZs(ctx context.Context, limit int, afterRegistrationDate *time.Time, afterID *uuid.UUID) ([]domain.PVZ, error) {
 
-func (r *PVZRepo) ListPVZs(ctx context.Context, page, limit int) ([]domain.PVZ, int, error) {
-	// --- 1. Получаем общее количество ---
-	var totalCount int
-	countQuery, _, err := r.sq.Select("COUNT(*)").From("pvz").ToSql()
-	if err != nil {
-		log.Printf("!!! ОШИБКА построения countQuery: %v", err) // Логируем ошибку
-		return nil, 0, fmt.Errorf("ошибка построения SQL для подсчета ПВЗ: %w", err)
-	}
-	log.Printf(">>> Выполняется countQuery: %s", countQuery) // Логируем сам SQL
-
-	// Выполняем запрос подсчета
-	row := r.db.QueryRowContext(ctx, countQuery) // Получаем *sql.Row
-	err = row.Scan(&totalCount)                  // Сканируем результат в totalCount
-	if err != nil {
-		// Логируем ошибку сканирования
-		log.Printf("!!! ОШИБКА выполнения/сканирования countQuery: %v", err)
-		// Проверяем, может быть, это sql.ErrNoRows (хотя для COUNT(*) это невозможно)
-		if errors.Is(err, sql.ErrNoRows) {
-			log.Println("Получена ошибка sql.ErrNoRows при подсчете ПВЗ (очень странно!)")
-			// В этом случае считаем, что count = 0
-			totalCount = 0
-			// НЕ возвращаем ошибку, просто count будет 0
-		} else {
-			// Другая ошибка - возвращаем ее
-			return nil, 0, fmt.Errorf("ошибка выполнения SQL для подсчета ПВЗ: %w", err)
-		}
-	}
-	log.Printf(">>> Подсчитано ПВЗ (totalCount после Scan): %d", totalCount) // Логируем результат
-
-	// --- Обработка случая, когда ПВЗ нет ---
-	if totalCount == 0 {
-		log.Println("ПВЗ не найдены, возвращаем пустой результат.")
-		return []domain.PVZ{}, 0, nil
-	}
-
-	// --- 2. Получаем нужную страницу ---
-	// (остальной код получения страницы без изменений)
-	offset := (page - 1) * limit
-	selectQuery, args, err := r.sq.
+	// Базовый SELECT с сортировкой (добавляем ID для стабильности)
+	queryBuilder := r.sq.
 		Select("id", "registration_date", "city").
 		From("pvz").
-		OrderBy("registration_date DESC").
-		Limit(uint64(limit)).
-		Offset(uint64(offset)).
-		ToSql()
-	if err != nil {
-		return nil, 0, fmt.Errorf("ошибка построения SQL для получения списка ПВЗ: %w", err)
-	}
-	// log.Printf(">>> Выполняется selectQuery: %s, Args: %v", selectQuery, args) // Можно раскомментировать для отладки
+		OrderBy("registration_date DESC", "id DESC"). // Важно добавить id DESC!
+		Limit(uint64(limit))
 
-	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
+	// Добавляем условие WHERE, если курсор предоставлен (ОБА параметра)
+	if afterRegistrationDate != nil && afterID != nil {
+		// Используем <= и < потому что сортировка DESC по registration_date и id
+		// Ищем записи, которые либо "старше", либо "такого же возраста, но с меньшим ID"
+		queryBuilder = queryBuilder.Where(
+			squirrel.Or{
+				squirrel.Lt{"registration_date": *afterRegistrationDate}, // registration_date < ?
+				squirrel.And{ // ИЛИ (registration_date = ? AND id < ?)
+					squirrel.Eq{"registration_date": *afterRegistrationDate},
+					squirrel.Lt{"id": *afterID},
+				},
+			},
+		)
+	} else if afterRegistrationDate != nil || afterID != nil {
+		// Ситуация, когда передан только один параметр курсора - некорректна
+		// Хотя API может это проверять, добавим проверку и здесь для надежности
+		return nil, errors.New("для keyset pagination необходимо передавать оба параметра курсора (after_registration_date и after_id) или ни одного")
+	}
+
+	// Генерируем SQL и аргументы
+	sqlQuery, args, err := queryBuilder.ToSql()
 	if err != nil {
-		log.Printf("!!! ОШИБКА выполнения selectQuery: %v", err) // Логируем ошибку
-		return nil, 0, fmt.Errorf("ошибка выполнения SQL для получения списка ПВЗ: %w", err)
+		return nil, fmt.Errorf("ошибка построения SQL для списка ПВЗ: %w", err)
+	}
+
+	// log.Printf("DEBUG: Executing ListPVZs: %s with args %v", sqlQuery, args) // Раскомментировать для отладки
+
+	// Выполняем запрос
+	rows, err := r.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		log.Printf("!!! ОШИБКА выполнения SQL для списка ПВЗ: %v", err) // Используем стандартный log для простоты
+		return nil, fmt.Errorf("ошибка выполнения SQL для списка ПВЗ: %w", err)
 	}
 	defer rows.Close()
 
-	pvzList := make([]domain.PVZ, 0, limit)
-	scanErrors := 0 // Счетчик ошибок сканирования строк
+	// Сканируем результаты
+	pvzList := make([]domain.PVZ, 0, limit) // Создаем срез с capacity = limit
 	for rows.Next() {
 		var pvz domain.PVZ
+		// Убедитесь, что порядок сканирования соответствует SELECT
 		if err := rows.Scan(&pvz.ID, &pvz.RegistrationDate, &pvz.City); err != nil {
 			log.Printf("!!! ОШИБКА сканирования строки ПВЗ: %v", err)
-			scanErrors++
-			continue // Пытаемся продолжить со следующей строкой
+			// Можно вернуть ошибку или просто пропустить строку и залогировать
+			// return nil, fmt.Errorf("ошибка сканирования строки ПВЗ: %w", err)
+			continue // Пропускаем строку с ошибкой сканирования
 		}
 		pvzList = append(pvzList, pvz)
 	}
-	if err = rows.Err(); err != nil { // Ошибка во время итерации
-		return nil, 0, fmt.Errorf("ошибка итерации по результатам ПВЗ: %w", err)
-	}
-	if scanErrors > 0 {
-		log.Printf("!!! Было %d ошибок при сканировании строк ПВЗ", scanErrors)
-		// Решаем, возвращать ли ошибку, если были проблемы со сканированием части строк
-		// return nil, 0, fmt.Errorf("произошли ошибки при чтении данных ПВЗ")
+
+	// Проверяем ошибки после итерации
+	if err = rows.Err(); err != nil {
+		log.Printf("!!! ОШИБКА итерации по результатам ПВЗ: %v", err)
+		return nil, fmt.Errorf("ошибка итерации по результатам ПВЗ: %w", err)
 	}
 
-	// --- Возвращаем результат ---
-	log.Printf(">>> Возвращаем список ПВЗ (count: %d) и totalCount: %d", len(pvzList), totalCount)
-	return pvzList, totalCount, nil
+	// Возвращаем полученный список (totalCount больше не нужен)
+	return pvzList, nil
+}
+
+// GetAllPVZs - реализует repository.PVZRepository.
+// ВАЖНО: Эта реализация может быть неэффективной для очень больших таблиц.
+// Используется в основном для gRPC, где пагинация не была реализована.
+func (r *PVZRepo) GetAllPVZs(ctx context.Context) ([]domain.PVZ, error) {
+	query, args, err := r.sq.
+		Select("id", "registration_date", "city").
+		From("pvz").
+		OrderBy("registration_date DESC"). // Оставляем сортировку для консистентности
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("ошибка построения SQL для GetAllPVZs: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		log.Printf("!!! ОШИБКА выполнения SQL для GetAllPVZs: %v", err)
+		return nil, fmt.Errorf("ошибка выполнения SQL для GetAllPVZs: %w", err)
+	}
+	defer rows.Close()
+
+	pvzList := make([]domain.PVZ, 0)
+	for rows.Next() {
+		var pvz domain.PVZ
+		if err := rows.Scan(&pvz.ID, &pvz.RegistrationDate, &pvz.City); err != nil {
+			log.Printf("!!! ОШИБКА сканирования строки ПВЗ в GetAllPVZs: %v", err)
+			continue
+		}
+		pvzList = append(pvzList, pvz)
+	}
+	if err = rows.Err(); err != nil {
+		log.Printf("!!! ОШИБКА итерации по результатам GetAllPVZs: %v", err)
+		return nil, fmt.Errorf("ошибка итерации по результатам GetAllPVZs: %w", err)
+	}
+
+	return pvzList, nil
 }

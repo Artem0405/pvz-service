@@ -83,12 +83,13 @@ components:
           description: ID пункта выдачи заказов, к которому относится приемка
         status:
           $ref: '#/components/schemas/ReceptionStatus' # Ссылка на Enum
-      required: [dateTime, pvzId, status] # Все поля, кроме ID, обязательны при ответе
+      # Убрали required, т.к. при ответе все поля будут, а при запросе - нет
+      # required: [dateTime, pvzId, status]
 
     ReceptionStatus: # Выносим Enum в отдельную схему
       type: string
       description: Статус приемки товаров
-      enum: [in_progress, closed] # Используем 'closed' вместо 'close' для единообразия с кодом
+      enum: [in_progress, closed]
       example: in_progress
 
     Product:
@@ -100,7 +101,7 @@ components:
           format: uuid
           description: Уникальный идентификатор товара
           readOnly: true
-        dateTimeAdded: # Меняем dateTime на dateTimeAdded для соответствия домену
+        dateTimeAdded:
           type: string
           format: date-time
           description: Дата и время добавления товара в приемку
@@ -111,7 +112,8 @@ components:
           type: string
           format: uuid
           description: ID приемки, к которой относится товар
-      required: [type, receptionId] # Обязательны при создании/ответе
+      # Убрали required
+      # required: [type, receptionId]
 
     ProductType: # Выносим Enum в отдельную схему
       type: string
@@ -129,13 +131,12 @@ components:
       required: [message]
 
     # --- Схемы для составных ответов ---
-    ProductInfo: # Информация о товаре для списка (если нужна отдельная)
+    ProductInfo:
       description: Краткая информация о товаре в рамках ответа списка ПВЗ
-      allOf: # Наследуем все от Product
+      allOf:
         - $ref: '#/components/schemas/Product'
-      # Можно добавить/убрать поля при необходимости
 
-    ReceptionInfo: # Информация о приемке с товарами для списка
+    ReceptionInfo:
       description: Информация о приемке, включая список товаров, для ответа списка ПВЗ
       type: object
       properties:
@@ -144,7 +145,7 @@ components:
         products:
           type: array
           items:
-            $ref: '#/components/schemas/ProductInfo' # Ссылка на схему товара для списка
+            $ref: '#/components/schemas/ProductInfo'
       required:
         - reception
         - products
@@ -158,39 +159,37 @@ components:
         receptions:
           type: array
           items:
-            $ref: '#/components/schemas/ReceptionInfo' # Ссылка на приемку с товарами
+            $ref: '#/components/schemas/ReceptionInfo'
       required:
         - pvz
         - receptions
 
-    PvzListResponse: # Полный ответ для GET /pvz
-       description: Ответ со списком ПВЗ, пагинацией и деталями приемок/товаров
-       type: object
-       properties:
-         items:
-           type: array
-           items:
-             $ref: '#/components/schemas/PvzListItem' # Ссылка на элемент списка
-         totalCount:
-           type: integer
-           description: Общее количество ПВЗ, доступных по запросу (без учета пагинации)
-           example: 42
-         page:
-           type: integer
-           description: Номер текущей страницы (начиная с 1)
-           example: 1
-         limit:
-           type: integer
-           description: Количество элементов на странице
-           example: 10
-       required:
-         - items
-         - totalCount
-         - page
-         - limit
+    # --- ИЗМЕНЕНО: Схема ответа для GET /pvz с Keyset Pagination ---
+    PvzListResponseKeyset:
+      description: Ответ со списком ПВЗ и курсором для следующей страницы
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PvzListItem' # Ссылка на элемент списка
+        next_after_registration_date: # Курсор для следующего запроса
+          type: string
+          format: date-time
+          nullable: true # Будет null, если это последняя страница
+          description: "Курсор для следующей страницы: registration_date последнего элемента"
+        next_after_id: # Курсор для следующего запроса
+          type: string
+          format: uuid
+          nullable: true # Будет null, если это последняя страница
+          description: "Курсор для следующей страницы: id последнего элемента"
+      required:
+        - items
+        # next_after поля не обязательны, они null на последней странице
 
-    # --- Схемы для тел запросов (где они отличаются от основных схем) ---
+    # --- Схемы для тел запросов ---
     RegisterUserRequest:
+      # ... без изменений ...
       description: Данные для регистрации нового пользователя
       type: object
       properties:
@@ -205,6 +204,7 @@ components:
       required: [email, password, role]
 
     LoginUserRequest:
+      # ... без изменений ...
       description: Данные для входа пользователя
       type: object
       properties:
@@ -217,6 +217,7 @@ components:
       required: [email, password]
 
     DummyLoginRequest:
+      # ... без изменений ...
       description: Запрос для получения тестового токена
       type: object
       properties:
@@ -225,6 +226,7 @@ components:
       required: [role]
 
     InitiateReceptionRequest:
+      # ... без изменений ...
       description: Запрос на инициацию новой приемки
       type: object
       properties:
@@ -235,6 +237,7 @@ components:
       required: [pvzId]
 
     AddProductRequest:
+      # ... без изменений ...
       description: Запрос на добавление товара в приемку
       type: object
       properties:
@@ -246,8 +249,8 @@ components:
           $ref: '#/components/schemas/ProductType'
       required: [pvzId, type]
 
-    # --- Схема для простого сообщения ---
     MessageResponse:
+      # ... без изменений ...
       type: object
       properties:
         message:
@@ -255,27 +258,25 @@ components:
       required:
         - message
 
-
   securitySchemes:
-    bearerAuth: # Имя схемы должно совпадать с используемым в security: - bearerAuth: []
+    bearerAuth: # ... без изменений ...
       type: http
       scheme: bearer
       bearerFormat: JWT
       description: JWT токен доступа, полученный через /login или /dummyLogin
 
 paths:
-  /dummyLogin:
+  /dummyLogin: # ... без изменений ...
     post:
       summary: Получение тестового токена
-      operationId: postDummyLogin # Уникальный ID операции (полезно для генераторов)
-      tags: # Группируем эндпоинты по тегам
-        - Auth
+      operationId: postDummyLogin
+      tags: [Auth]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DummyLoginRequest' # Ссылка на схему запроса
+              $ref: '#/components/schemas/DummyLoginRequest'
       responses:
         '200':
           description: Успешная авторизация, возвращен токен
@@ -290,50 +291,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /register:
+  /register: # ... без изменений ...
     post:
       summary: Регистрация пользователя
       operationId: postRegister
-      tags:
-        - Auth
+      tags: [Auth]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RegisterUserRequest' # Ссылка на схему запроса
+              $ref: '#/components/schemas/RegisterUserRequest'
       responses:
         '201':
           description: Пользователь успешно создан
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User' # Возвращаем данные пользователя
+                $ref: '#/components/schemas/User'
         '400':
           description: Неверный запрос (невалидные данные)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '409': # Используем 409 для конфликта email
+        '409':
           description: Пользователь с таким email уже существует
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /login:
+  /login: # ... без изменений ...
     post:
       summary: Авторизация пользователя
       operationId: postLogin
-      tags:
-        - Auth
+      tags: [Auth]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginUserRequest' # Ссылка на схему запроса
+              $ref: '#/components/schemas/LoginUserRequest'
       responses:
         '200':
           description: Успешная авторизация, возвращен токен
@@ -349,21 +348,18 @@ paths:
                 $ref: '#/components/schemas/Error'
 
   /pvz:
-    post:
+    post: # ... без изменений ...
       summary: Создание ПВЗ (только для модераторов)
       operationId: postPvz
-      tags:
-        - PVZ
+      tags: [PVZ]
       security:
-        - bearerAuth: [] # Указываем схему безопасности
+        - bearerAuth: []
       requestBody:
         description: Данные для создания нового ПВЗ (только город)
         required: true
         content:
           application/json:
             schema:
-              # Ссылка на основную схему PVZ, но при создании используется только city
-              # Можно создать отдельную CreatePVZRequest схему, если нужно
               $ref: '#/components/schemas/PVZ'
       responses:
         '201':
@@ -371,35 +367,37 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PVZ' # Возвращаем созданный ПВЗ
+                $ref: '#/components/schemas/PVZ'
         '400':
           description: Неверный запрос (например, недопустимый город)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '401': # Добавляем 401, т.к. эндпоинт защищен
-          description: Неавторизован (токен отсутствует, невалиден или истек)
+        '401':
+          description: Неавторизован
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Доступ запрещен (недостаточно прав, не модератор)
+          description: Доступ запрещен
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
+    # --- ИЗМЕНЕНО: GET /pvz ---
     get:
-      summary: Получение списка ПВЗ с деталями
-      description: Получение списка ПВЗ с возможностью фильтрации по дате приемки и пагинацией. Включает информацию о приемках и товарах.
-      operationId: getPvzList
+      summary: Получение списка ПВЗ с деталями (keyset pagination)
+      description: Получение списка ПВЗ с использованием keyset пагинации. Включает информацию о приемках и товарах. Фильтры по дате приемки остаются.
+      operationId: getPvzListKeyset # Изменили ID операции
       tags:
         - PVZ
       security:
         - bearerAuth: [] # Защищаем эндпоинт
       parameters:
+        # --- Фильтры по дате (остаются) ---
         - name: startDate
           in: query
           description: Начальная дата диапазона (фильтр для приемок)
@@ -414,14 +412,7 @@ paths:
           schema:
             type: string
             format: date-time
-        - name: page
-          in: query
-          description: Номер страницы
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
+        # --- Параметры Keyset Pagination ---
         - name: limit
           in: query
           description: Количество элементов на странице
@@ -429,80 +420,89 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 30 # Оставляем ограничение
+            maximum: 30
             default: 10
-      responses:
-        '200':
-          description: Успешный ответ со списком ПВЗ и деталями
-          content:
-            application/json:
-              schema:
-                # Ссылка на схему полного ответа
-                $ref: '#/components/schemas/PvzListResponse'
-        '401': # Добавляем 401
-          description: Неавторизован
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '400': # Добавляем 400 для невалидных параметров пагинации/дат
-          description: Неверный запрос (например, невалидный формат даты или номер страницы)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-
-  /pvz/{pvzId}/close_last_reception:
-    post:
-      summary: Закрытие последней открытой приемки
-      operationId: postCloseLastReception
-      tags:
-        - Receptions
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: pvzId
-          in: path
-          required: true
-          description: ID ПВЗ, для которого закрывается приемка
+        - name: after_registration_date # Новый параметр
+          in: query
+          description: "Курсор: Дата регистрации последнего элемента предыдущей страницы (RFC3339)"
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: after_id # Новый параметр
+          in: query
+          description: "Курсор: ID последнего элемента предыдущей страницы (для уникальности)"
+          required: false
           schema:
             type: string
             format: uuid
       responses:
         '200':
-          description: Приемка успешно закрыта
+          description: Успешный ответ со списком ПВЗ и курсором для следующей страницы
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Reception' # Возвращаем закрытую приемку
-        '400':
-          description: Неверный запрос (нет открытой приемки, неверный pvzId)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+                # Ссылка на НОВУЮ схему ответа
+                $ref: '#/components/schemas/PvzListResponseKeyset'
         '401':
           description: Неавторизован
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '403': # Хотя сейчас любой авторизованный может закрыть
-          description: Доступ запрещен (если бы были доп. проверки)
+        '400': # Оставляем для невалидных дат или курсоров
+          description: Неверный запрос (например, невалидный формат даты/UUID курсора)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  # --- Остальные эндпоинты без изменений ---
+  /pvz/{pvzId}/close_last_reception: # ... без изменений ...
+    post:
+      summary: Закрытие последней открытой приемки
+      operationId: postCloseLastReception
+      tags: [Receptions]
+      security:
+      - bearerAuth: []
+      parameters:
+        - name: pvzId
+          in: path
+          required: true
+          description: ID ПВЗ, для которого закрывается приемка
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Приемка успешно закрыта
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reception' 
+        '400':
+          description: Неверный запрос (нет открытой приемки, неверный pvzId)
+          content:
+            application/json:
+              schema:
+              $ref: '#/components/schemas/Error' 
+        '401':
+          description: Неавторизован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error' 
+        '403':
+          description: Доступ запрещен
+          content:
+            application/json:
+              schema: 
+                $ref: '#/components/schemas/Error' 
 
-  /pvz/{pvzId}/delete_last_product:
+  /pvz/{pvzId}/delete_last_product: # ... без изменений ...
     post:
       summary: Удаление последнего добавленного товара
       description: Удаляет последний добавленный товар из последней открытой приемки для указанного ПВЗ (LIFO).
       operationId: postDeleteLastProduct
-      tags:
-        - Products
+      tags: [Products]
       security:
         - bearerAuth: []
       parameters:
@@ -510,111 +510,107 @@ paths:
           in: path
           required: true
           description: ID ПВЗ, из приемки которого удаляется товар
-          schema:
-            type: string
-            format: uuid
+          schema: { type: string, format: uuid }
       responses:
-        '200': # Меняем 200 на 200 с телом
+        '200':
           description: Товар успешно удален
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MessageResponse' # Используем схему сообщения
+                $ref: '#/components/schemas/MessageResponse'
         '400':
           description: Неверный запрос (нет активной приемки, нет товаров, неверный pvzId)
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 
         '401':
           description: Неавторизован
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 
         '403':
-          description: Доступ запрещен (если бы были доп. проверки)
+          description: Доступ запрещен
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/Error' 
 
-  /receptions:
+  /receptions: # ... без изменений ...
     post:
       summary: Инициировать новую приемку товаров
       operationId: postReceptions
-      tags:
-        - Receptions
-      security:
+      tags: [Receptions]
+      security: # <-- Исправили на правильный синтаксис?
         - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/InitiateReceptionRequest' # Ссылка на схему запроса
+            schema: 
+              $ref: '#/components/schemas/InitiateReceptionRequest' 
       responses:
         '201':
           description: Приемка успешно создана
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Reception' # Возвращаем созданную приемку
+              schema: 
+                $ref: '#/components/schemas/Reception' 
         '400':
           description: Неверный запрос (например, уже есть незакрытая приемка)
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 
         '401':
           description: Неавторизован
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Доступ запрещен (если бы были доп. проверки)
+               $ref: '#/components/schemas/Error' 
+        '403': # <-- Строка ~465 должна быть где-то здесь или чуть ниже
+          description: Доступ запрещен
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 
 
-  /products:
+  /products: # ... без изменений ...
     post:
       summary: Добавление товара в текущую приемку
       operationId: postProducts
-      tags:
-        - Products
+      tags: [Products]
       security:
         - bearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/AddProductRequest' # Ссылка на схему запроса
+            schema: 
+              $ref: '#/components/schemas/AddProductRequest' 
       responses:
         '201':
           description: Товар успешно добавлен
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Product' # Возвращаем добавленный товар
+               $ref: '#/components/schemas/Product' 
         '400':
           description: Неверный запрос (нет активной приемки, неверный тип товара или pvzId)
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 
         '401':
           description: Неавторизован
           content:
             application/json:
-              schema:
+              schema: 
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Доступ запрещен (если бы были доп. проверки)
+          description: Доступ запрещен
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+              schema: 
+                $ref: '#/components/schemas/Error' 

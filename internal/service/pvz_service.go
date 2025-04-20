@@ -5,148 +5,144 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time" // Необходим для GetPVZList и формирования ответа в CreatePVZ
+	"time"
 
 	"github.com/Artem0405/pvz-service/internal/domain"
 	"github.com/Artem0405/pvz-service/internal/repository"
-	"github.com/google/uuid" // Необходим для ключей карт в GetPVZList
+	"github.com/google/uuid"
 
-	// --- ИМПОРТ ПАКЕТА С МЕТРИКАМИ ---
-	// Предполагается, что вы создадите этот пакет и определите в нем
-	// экспортируемую метрику: var PVZCreatedTotal = promauto.NewCounter(...)
 	mmetrics "github.com/Artem0405/pvz-service/internal/metrics"
-	// ---------------------------------
 )
 
 // pvzService - реализация интерфейса PVZService.
-// Содержит бизнес-логику для управления ПВЗ.
-// Использует интерфейсы репозиториев для взаимодействия с хранилищем данных.
 type pvzService struct {
-	pvzRepo       repository.PVZRepository       // Репозиторий для работы с ПВЗ
-	receptionRepo repository.ReceptionRepository // Репозиторий для работы с приемками (нужен для GetPVZList)
+	pvzRepo       repository.PVZRepository
+	receptionRepo repository.ReceptionRepository
 }
 
-// NewPVZService - конструктор для создания экземпляра pvzService.
-// Принимает интерфейсы репозиториев в качестве зависимостей.
+// --- ИСПРАВЛЕНО: NewPVZService - конструктор ---
+// Возвращаемый тип - ИНТЕРФЕЙС PVZService
+func NewPVZService(pvzRepo repository.PVZRepository, receptionRepo repository.ReceptionRepository) PVZService {
+	return &pvzService{ // Возвращаем указатель на структуру, реализующую интерфейс
+		pvzRepo:       pvzRepo,
+		receptionRepo: receptionRepo,
+	}
+}
+
+// CreatePVZ (код без изменений)
+func (s *pvzService) CreatePVZ(ctx context.Context, input domain.PVZ) (domain.PVZ, error) {
+	if input.City != "Москва" && input.City != "Санкт-Петербург" && input.City != "Казань" {
+		slog.WarnContext(ctx, "Попытка создания ПВЗ с недопустимым городом", slog.String("город", input.City))
+		return domain.PVZ{}, errors.New("создание ПВЗ возможно только в городах: Москва, Санкт-Петербург, Казань")
+	}
+
+	pvzToCreate := domain.PVZ{City: input.City}
+	newID, err := s.pvzRepo.CreatePVZ(ctx, pvzToCreate)
+	if err != nil {
+		slog.ErrorContext(ctx, "Ошибка репозитория при создании ПВЗ", slog.String("город", input.City), slog.Any("error", err))
+		return domain.PVZ{}, fmt.Errorf("не удалось сохранить ПВЗ: %w", err)
+	}
+
+	mmetrics.PVZCreatedTotal.Inc()
+
+	createdPVZ := domain.PVZ{
+		ID:               newID,
+		City:             input.City,
+		RegistrationDate: time.Now(),
+	}
+	slog.InfoContext(ctx, "ПВЗ успешно создан", slog.String("pvz_id", newID.String()), slog.String("город", input.City))
+	return createdPVZ, nil
+}
+
+// --- ИСПРАВЛЕНО: GetPVZList - реализация метода ---
+// Сигнатура соответствует интерфейсу service.PVZService
+// Возвращаемый тип - GetPVZListResult (определенный выше или в domain)
+func (s *pvzService) GetPVZList(ctx context.Context, startDate, endDate *time.Time, limit int, afterRegistrationDate *time.Time, afterID *uuid.UUID) (GetPVZListResult, error) {
+	// Инициализируем структуру результата
+	result := GetPVZListResult{ // Используем тип GetPVZListResult
+		Receptions: make(map[uuid.UUID][]domain.Reception),
+		Products:   make(map[uuid.UUID][]domain.Product),
+		PVZs:       []domain.PVZ{},
+	}
+
+	// 1. Получаем ПВЗ
+	pvzList, err := s.pvzRepo.ListPVZs(ctx, limit, afterRegistrationDate, afterID) // Вызов репозитория соответствует интерфейсу
+	if err != nil {
+		slog.ErrorContext(ctx, "Ошибка получения списка ПВЗ из репозитория", "error", err)
+		return result, fmt.Errorf("не удалось получить список ПВЗ: %w", err)
+	}
+	result.PVZs = pvzList
+
+	// 2. Определяем курсор для следующей страницы
+	if len(pvzList) == limit {
+		lastPVZ := pvzList[len(pvzList)-1]
+		nextDate := lastPVZ.RegistrationDate         // Копируем значение
+		nextID := lastPVZ.ID                         // Копируем значение
+		result.NextAfterRegistrationDate = &nextDate // Присваиваем указатель полю структуры result
+		result.NextAfterID = &nextID                 // Присваиваем указатель полю структуры result
+	}
+
+	// 3. Если ПВЗ нет, выходим
+	if len(pvzList) == 0 {
+		slog.DebugContext(ctx, "ПВЗ не найдены для данного курсора/фильтров")
+		return result, nil
+	}
+
+	// 4. Собираем ID ПВЗ
+	pvzIDs := make([]uuid.UUID, 0, len(pvzList))
+	for _, pvz := range pvzList {
+		pvzIDs = append(pvzIDs, pvz.ID)
+	}
+
+	// 5. Получаем Приемки
+	receptions, err := s.receptionRepo.ListReceptionsByPVZIDs(ctx, pvzIDs, startDate, endDate)
+	if err != nil {
+		slog.ErrorContext(ctx, "Ошибка получения приемок для ПВЗ", "pvz_ids", pvzIDs, "error", err)
+		return result, fmt.Errorf("не удалось получить приемки: %w", err)
+	}
+
+	// 6. Группируем Приемки и собираем ID
+	receptionIDs := make([]uuid.UUID, 0, len(receptions))
+	if len(receptions) > 0 {
+		for _, rcp := range receptions {
+			result.Receptions[rcp.PVZID] = append(result.Receptions[rcp.PVZID], rcp)
+			receptionIDs = append(receptionIDs, rcp.ID)
+		}
+	} else {
+		slog.DebugContext(ctx, "Приемки не найдены для ПВЗ на этой странице/фильтров", "pvz_ids", pvzIDs)
+		return result, nil // Возвращаем ПВЗ без приемок
+	}
+
+	// 7. Получаем Товары
+	if len(receptionIDs) > 0 {
+		products, err := s.receptionRepo.ListProductsByReceptionIDs(ctx, receptionIDs)
+		if err != nil {
+			slog.ErrorContext(ctx, "Ошибка получения товаров для приемок", "reception_ids", receptionIDs, "error", err)
+			return result, fmt.Errorf("не удалось получить товары: %w", err)
+		}
+
+		// 8. Группируем Товары
+		for _, p := range products {
+			result.Products[p.ReceptionID] = append(result.Products[p.ReceptionID], p)
+		}
+	}
+
+	slog.DebugContext(ctx, "Список ПВЗ (keyset) с деталями успешно сформирован",
+		"pvz_count_on_page", len(result.PVZs),
+		"limit", limit,
+		"hasNextPage", result.NextAfterID != nil,
+	)
+	// 9. Возвращаем результат
+	return result, nil
+}
+
+// --- УДАЛИТЕ ЭТОТ БЛОК (СТРОКИ ~155 И ДАЛЕЕ), ОН ДУБЛИРУЕТ КОНСТРУКТОР ---
+/*
 func NewPVZService(pvzRepo repository.PVZRepository, receptionRepo repository.ReceptionRepository) *pvzService {
 	return &pvzService{
 		pvzRepo:       pvzRepo,
 		receptionRepo: receptionRepo,
 	}
 }
-
-// CreatePVZ - создает новый ПВЗ после валидации входных данных.
-func (s *pvzService) CreatePVZ(ctx context.Context, input domain.PVZ) (domain.PVZ, error) {
-	// 1. Валидация входных данных (город)
-	if input.City != "Москва" && input.City != "Санкт-Петербург" && input.City != "Казань" {
-		// Логируем как предупреждение (Warn), так как это ошибка ввода пользователя, а не системы
-		slog.WarnContext(ctx, "Попытка создания ПВЗ с недопустимым городом", slog.String("город", input.City))
-		return domain.PVZ{}, errors.New("создание ПВЗ возможно только в городах: Москва, Санкт-Петербург, Казань")
-	}
-
-	// 2. Вызов репозитория ПВЗ для сохранения данных
-	// Передаем только те поля, которые нужны для создания в БД
-	pvzToCreate := domain.PVZ{
-		City: input.City,
-	}
-	newID, err := s.pvzRepo.CreatePVZ(ctx, pvzToCreate)
-	if err != nil {
-		// Логируем как ошибку (Error), так как проблема на уровне БД/репозитория
-		slog.ErrorContext(ctx, "Ошибка репозитория при создании ПВЗ",
-			slog.String("город", input.City),
-			slog.Any("error", err), // Используем Any для ошибки
-		)
-		return domain.PVZ{}, fmt.Errorf("не удалось сохранить ПВЗ: %w", err)
-	}
-
-	// --- ИНКРЕМЕНТ БИЗНЕС-МЕТРИКИ ---
-	mmetrics.PVZCreatedTotal.Inc()
-	slog.InfoContext(ctx, "Инкрементирована метрика pvz_created_total")
-	// ---------------------------------
-
-	// 3. Формирование ответа
-	// Заполняем структуру ответа, включая сгенерированный ID и дату (приблизительную)
-	createdPVZ := domain.PVZ{
-		ID:               newID,
-		City:             input.City,
-		RegistrationDate: time.Now(), // Генерируем дату для ответа API, БД сама ставит точную
-	}
-
-	// Логируем успешное создание как информацию (Info)
-	slog.InfoContext(ctx, "ПВЗ успешно создан", slog.String("pvz_id", newID.String()), slog.String("город", input.City))
-
-	return createdPVZ, nil
-}
-
-// GetPVZList - реализация метода получения списка ПВЗ с деталями (приемками и товарами).
-// Возвращает GetPVZListResult с доменными моделями.
-func (s *pvzService) GetPVZList(ctx context.Context, startDate, endDate *time.Time, page, limit int) (domain.GetPVZListResult, error) {
-	// Инициализируем пустую структуру результата
-	// Важно инициализировать карты, чтобы избежать nil pointer panic позже
-	result := domain.GetPVZListResult{
-		Receptions: make(map[uuid.UUID][]domain.Reception),
-		Products:   make(map[uuid.UUID][]domain.Product),
-		PVZs:       []domain.PVZ{}, // Инициализируем пустым слайсом
-	}
-
-	// 1. Получаем страницу ПВЗ и общее количество из репозитория ПВЗ
-	pvzList, totalCount, err := s.pvzRepo.ListPVZs(ctx, page, limit)
-	if err != nil {
-		slog.ErrorContext(ctx, "Ошибка получения списка ПВЗ из репозитория", "error", err, "page", page, "limit", limit)
-		return result, fmt.Errorf("не удалось получить список ПВЗ: %w", err)
-	}
-	result.TotalPVZs = totalCount
-
-	// Если ПВЗ на этой странице (или вообще) нет, возвращаем результат с пустым списком PVZs
-	if len(pvzList) == 0 {
-		slog.InfoContext(ctx, "ПВЗ не найдены для данной страницы/фильтров", "page", page, "limit", limit, "startDate", startDate, "endDate", endDate)
-		// result уже инициализирован с пустым PVZs и totalCount = 0 (или актуальным)
-		return result, nil
-	}
-	result.PVZs = pvzList // Сохраняем найденные ПВЗ
-
-	// 2. Собираем ID полученных ПВЗ для последующих запросов
-	pvzIDs := make([]uuid.UUID, 0, len(pvzList))
-	for _, pvz := range pvzList {
-		pvzIDs = append(pvzIDs, pvz.ID)
-	}
-
-	// 3. Получаем все приемки для этих ПВЗ с учетом фильтров по дате
-	receptions, err := s.receptionRepo.ListReceptionsByPVZIDs(ctx, pvzIDs, startDate, endDate)
-	if err != nil {
-		slog.ErrorContext(ctx, "Ошибка получения приемок для ПВЗ", "pvz_ids", pvzIDs, "error", err)
-		// Возвращаем ошибку, т.к. без приемок не можем показать полную картину
-		return result, fmt.Errorf("не удалось получить приемки: %w", err)
-	}
-
-	// Если приемок нет (из-за фильтров или их отсутствия), нет смысла запрашивать товары
-	if len(receptions) == 0 {
-		slog.InfoContext(ctx, "Приемки не найдены для ПВЗ на этой странице/фильтров", "pvz_ids", pvzIDs, "startDate", startDate, "endDate", endDate)
-		// result уже содержит PVZs и пустые карты Receptions/Products
-		return result, nil
-	}
-
-	// Группируем приемки по ID ПВЗ и собираем ID приемок для запроса товаров
-	receptionIDs := make([]uuid.UUID, 0, len(receptions))
-	for _, rcp := range receptions {
-		result.Receptions[rcp.PVZID] = append(result.Receptions[rcp.PVZID], rcp)
-		receptionIDs = append(receptionIDs, rcp.ID)
-	}
-
-	// 4. Получаем все товары для найденных приемок
-	products, err := s.receptionRepo.ListProductsByReceptionIDs(ctx, receptionIDs)
-	if err != nil {
-		slog.ErrorContext(ctx, "Ошибка получения товаров для приемок", "reception_ids", receptionIDs, "error", err)
-		// Возвращаем ошибку, т.к. запросили приемки, но не смогли получить товары
-		return result, fmt.Errorf("не удалось получить товары: %w", err)
-	}
-
-	// Группируем товары по ID приемки
-	for _, p := range products {
-		result.Products[p.ReceptionID] = append(result.Products[p.ReceptionID], p)
-	}
-
-	slog.InfoContext(ctx, "Список ПВЗ с деталями успешно сформирован", "page", page, "limit", limit, "pvz_count_on_page", len(result.PVZs), "total_pvz_count", result.TotalPVZs)
-	// 5. Возвращаем собранную структуру с доменными данными
-	return result, nil
-}
+*/
+// --- КОНЕЦ УДАЛЯЕМОГО БЛОКА ---

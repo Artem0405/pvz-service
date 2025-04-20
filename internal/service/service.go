@@ -64,13 +64,16 @@ type AuthService interface {
 // PVZService определяет методы бизнес-логики для ПВЗ
 type PVZService interface {
 	CreatePVZ(ctx context.Context, input domain.PVZ) (domain.PVZ, error)
-	GetPVZList(ctx context.Context, startDate, endDate *time.Time, page, limit int) (domain.GetPVZListResult, error)
+	GetPVZList(ctx context.Context, startDate, endDate *time.Time, limit int, afterRegistrationDate *time.Time, afterID *uuid.UUID) (GetPVZListResult, error)
+	// Другие методы, если есть...
 }
 
 // GetPVZListResult - структура для возврата результата из сервиса GetPVZList
 type GetPVZListResult struct {
-	PVZs       []domain.PVZ                     // Список ПВЗ на странице
-	Receptions map[uuid.UUID][]domain.Reception // Приемки, сгруппированные по PVZ ID
-	Products   map[uuid.UUID][]domain.Product   // Товары, сгруппированные по Reception ID
-	TotalPVZs  int                              // Общее количество ПВЗ
+	PVZs       []domain.PVZ
+	Receptions map[uuid.UUID][]domain.Reception
+	Products   map[uuid.UUID][]domain.Product
+	// Убрали TotalPVZs
+	NextAfterRegistrationDate *time.Time // Добавили
+	NextAfterID               *uuid.UUID // Добавили
 }

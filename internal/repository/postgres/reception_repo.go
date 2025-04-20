@@ -20,6 +20,21 @@ type ReceptionRepo struct {
 	sq squirrel.StatementBuilderType
 }
 
+// CreatePVZ implements repository.PVZRepository.
+func (r *ReceptionRepo) CreatePVZ(ctx context.Context, pvz domain.PVZ) (uuid.UUID, error) {
+	panic("unimplemented")
+}
+
+// GetAllPVZs implements repository.PVZRepository.
+func (r *ReceptionRepo) GetAllPVZs(ctx context.Context) ([]domain.PVZ, error) {
+	panic("unimplemented")
+}
+
+// ListPVZs implements repository.PVZRepository.
+func (r *ReceptionRepo) ListPVZs(ctx context.Context, page int, limit int) ([]domain.PVZ, int, error) {
+	panic("unimplemented")
+}
+
 // NewReceptionRepo - конструктор для ReceptionRepo
 func NewReceptionRepo(db *sql.DB) *ReceptionRepo {
 	return &ReceptionRepo{
