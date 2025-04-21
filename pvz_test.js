@@ -20,10 +20,10 @@ let errorRate = new Rate('errors'); // Кастомный счетчик оши�
 // --- Конфигурация Нагрузки ---
 export const options = {
     stages: [
-        { duration: '30s', target: 50 },  // Разгон до 50
-        { duration: '1m', target: 100 }, // Разгон до 100
-        { duration: '3m', target: 100 }, // Стабильная нагрузка 100 VUs
-        { duration: '30s', target: 0 },   // Снижение
+        { duration: '1m', target: 150 },
+        { duration: '2m', target: 300 }, // Пробуем 300 VUs
+        { duration: '5m', target: 300 }, // Держим 5 минут
+        { duration: '30s', target: 0 },
     ],
 
     thresholds: {

@@ -73,7 +73,7 @@ type GetPVZListResult struct {
 	PVZs       []domain.PVZ
 	Receptions map[uuid.UUID][]domain.Reception
 	Products   map[uuid.UUID][]domain.Product
-	// Убрали TotalPVZs
-	NextAfterRegistrationDate *time.Time // Добавили
-	NextAfterID               *uuid.UUID // Добавили
+	// Поля для курсора следующей страницы
+	NextAfterRegistrationDate *time.Time
+	NextAfterID               *uuid.UUID
 }
